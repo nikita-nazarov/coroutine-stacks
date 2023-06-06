@@ -7,7 +7,12 @@ import com.intellij.debugger.impl.DebuggerManagerListener
 import com.intellij.debugger.impl.DebuggerSession
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanelWithEmptyText
+import com.intellij.ui.components.JBScrollPane
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
 import java.awt.*
@@ -109,8 +114,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         }
 
-
-
         val dispatcherLabel = JLabel("Select Dispatcher:  ")
 
         val parallelStackWindowHeader = Box.createHorizontalBox()
@@ -121,6 +124,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         dispatcherDropdownMenu.maximumSize = comboBoxSize
         dispatcherDropdownMenu.minimumSize = comboBoxSize
 
+        dispatcherDropdownMenu.addActionListener{
+            val selectedItem = dispatcherDropdownMenu.selectedItem
+        }
+
         parallelStackWindowHeader.add(dispatcherLabel)
         parallelStackWindowHeader.add(dispatcherDropdownMenu)
 
@@ -128,37 +135,139 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         coroutineGraph?.add(parallelStackWindowHeader)
 
         val parallelStackWindow = Box.createVerticalBox()
-        val row1 = Box.createHorizontalBox()
+        buildParallelStackWindow(mapOfParallelStackTree, parallelStackWindow, dispatcherList)
 
-        val button1 = JButton("button 1")
-        val button2 = JButton("button 2")
-        val button3 = JButton("button 3")
-
-        with(row1) {
-            add(button1)
-            add(button2)
-            add(button3)
-        }
-
-        val row2 = Box.createHorizontalBox()
-
-        val button4 = JButton("button 4")
-        val button5 = JButton("button 5")
-
-        with(row2) {
-            add(button4)
-            add(button5)
-        }
-
-        drawArrowBetweenComponents(button1, row1, button4, row2, parallelStackWindow)
-
-        parallelStackWindow.add(row1)
-        parallelStackWindow.add(Box.createVerticalStrut(25))
-        parallelStackWindow.add(row2)
         coroutineGraph?.add(parallelStackWindow)
 
         add(coroutineGraph)
 
+    }
+
+    private fun buildParallelStackWindow(
+        mapOfParallelStackTree: MutableMap<String, Tree<ParallelStackNode>>,
+        parallelStackWindow: Box?,
+        dispatcherList: Array<String>
+    ) {
+
+        val tree = mapOfParallelStackTree[dispatcherList[0]]
+        val lengthOfTree = getTreeLength(tree?.root)
+
+        val rows = mutableListOf<Box>()
+        for (i in 1..lengthOfTree) {
+            rows.add(Box.createHorizontalBox())
+        }
+
+        addCoroutineInfoToParallelStackWindow(tree?.root, rows, 0)
+
+        for (i in rows.reversed()) {
+            parallelStackWindow?.add(i)
+            parallelStackWindow?.add(Box.createVerticalStrut(25))
+        }
+
+    }
+
+    private fun addCoroutineInfoToParallelStackWindow(
+        node: CoroutineStacksPanel.TreeNode<CoroutineStacksPanel.ParallelStackNode>?,
+        rows: MutableList<Box>,
+        level: Int) {
+
+        if (node == null) {
+            return
+        }
+
+//        rows[level].add(JButton(node.value.toString()))
+        if (node.value.stacktrace.isNotEmpty()) {
+            addCoroutineInfoBox(node.value, rows[level])
+        }
+        for (child in node.children) {
+            addCoroutineInfoToParallelStackWindow(child, rows,level + 1)
+        }
+
+    }
+
+    private fun addCoroutineInfoBox(
+        value: CoroutineStacksPanel.ParallelStackNode,
+        box: Box) {
+
+        val headerText = "${value.additionalData.size} Coroutines"
+        val coroutineList = mutableListOf<String>()
+        coroutineList.add(headerText)
+
+        for (i in value.stacktrace) {
+            i?.let { coroutineList.add(it) }
+        }
+
+        val coroutineListView = JBList<String>(coroutineList)
+
+//        var maxLengthStackTrace = 0
+//        for (i in value.stacktrace) {
+//            if (i?.length!! > maxLengthStackTrace) {
+//                maxLengthStackTrace = i.length
+//            }
+//        }
+
+//        val headerBox = JLabel(headerText)
+//        headerBox.border = BorderFactory.createCompoundBorder(
+//            LineBorder(Color.BLACK, 1),
+//            EmptyBorder(2, 2, 2, 2)
+//        )
+//
+//        headerBox.font = Font("Arial", Font.ITALIC, 14)
+
+//        childBox.add(headerBox)
+//
+//        for (i in value.stacktrace) {
+////            val childBoxFrame = JLabel(addWhiteSpaces(i, maxLengthStackTrace - i!!.length))
+//            val childBoxFrame = JLabel(i)
+//            childBoxFrame.border = BorderFactory.createCompoundBorder(
+//                LineBorder(Color.BLACK, 1),
+//                EmptyBorder(2, 4, 2, 4)
+//            )
+//            childBox.add(childBoxFrame)
+//        }
+
+        coroutineListView.setCellRenderer(SeparatedListCellRenderer())
+        val scrollPane = JBScrollPane(coroutineListView)
+
+        // Create a border for the scroll pane
+
+        // Create a border for the scroll pane
+        val border = BorderFactory.createLineBorder(Color.BLACK, 1)
+        scrollPane.border = border
+
+        box.add(scrollPane)
+        box.add(Box.createHorizontalStrut(120))
+
+    }
+
+    internal class SeparatedListCellRenderer : DefaultListCellRenderer() {
+        override fun getListCellRendererComponent(
+            list: JList<*>,
+            value: Any,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): Component {
+            val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+            if (index < list.model.size - 1) {
+                (renderer as JComponent).border = ITEM_BORDER
+            } else {
+                (renderer as JComponent).border = null
+            }
+            return renderer
+        }
+
+        companion object {
+            private val ITEM_BORDER = BorderFactory.createMatteBorder(0, 0, 1, 0, Color.GRAY)
+        }
+    }
+
+    private fun addWhiteSpaces(i: String?, spaces: Int): String? {
+        var response = i
+        for (i in 1..spaces) {
+            response += " "
+        }
+        return response
     }
 
     private fun generateParallelStackTree(
@@ -261,13 +370,21 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
     }
 
-    private fun drawArrowBetweenComponents(
-        source: JComponent,
-        sourceContainer: JComponent,
-        target: JComponent,
-        targetContainer: JComponent,
-        container: JComponent
-    ) {
+    private fun <T> getTreeLength(root: TreeNode<T>?): Int {
+        if (root == null) {
+            return 0
+        }
+
+        var length = 1
+
+        for (child in root.children) {
+            length += getTreeLength(child)
+        }
+
+        return length
+    }
+
+    private fun drawArrowBetweenComponents(container: Container) {
         val arrowComponent = object : JComponent() {
             override fun paintComponent(g: Graphics) {
                 super.paintComponent(g)
@@ -275,28 +392,27 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 val g2d = g as Graphics2D
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
 
-                val sourceBounds = SwingUtilities.convertRectangle(sourceContainer, source.bounds, container)
-                val targetBounds = SwingUtilities.convertRectangle(targetContainer, target.bounds, container)
+//                val sourceBounds = SwingUtilities.convertRectangle(source.parent, source.bounds, container)
+//                val targetBounds = SwingUtilities.convertRectangle(target.parent, target.bounds, container)
 
-                val x1 = sourceBounds.x + sourceBounds.width / 2
-                val y1 = sourceBounds.y + sourceBounds.height
-                val x2 = targetBounds.x + targetBounds.width / 2
-                val y2 = targetBounds.y
+//                val x1 = sourceBounds.x + sourceBounds.width / 2
+//                val y1 = sourceBounds.y + sourceBounds.height
+//                val x2 = targetBounds.x + targetBounds.width / 2
+//                val y2 = targetBounds.y
 
                 g2d.color = Color.RED
                 g2d.stroke = BasicStroke(2.0f)
 
-                g2d.drawLine(x1, y1, x2, y2)
+                g2d.drawLine(0, 0, 5, 5)
 
-                val arrowSize = 8
+                val arrowSize = 4
                 val arrowhead = Polygon()
-                arrowhead.addPoint(x2, y2)
-                arrowhead.addPoint(x2 - arrowSize, y2 - arrowSize)
-                arrowhead.addPoint(x2 + arrowSize, y2 - arrowSize)
+                arrowhead.addPoint(5, 5)
+                arrowhead.addPoint(5 - arrowSize, 5 - arrowSize)
+                arrowhead.addPoint(5 + arrowSize, 5 - arrowSize)
                 g2d.fill(arrowhead)
             }
         }
-
         container.add(arrowComponent)
     }
 }
