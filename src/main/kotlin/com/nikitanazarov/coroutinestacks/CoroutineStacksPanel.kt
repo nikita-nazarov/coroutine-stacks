@@ -34,13 +34,11 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 override fun sessionCreated(session: DebuggerSession) {
                     session.process.addDebugProcessListener(object : DebugProcessListener {
                         override fun paused(suspendContext: SuspendContext) {
-                            println("paused")
                             emptyText.component.isVisible = false
                             buildCoroutineGraph(suspendContext)
                         }
 
                         override fun resumed(suspendContext: SuspendContext?) {
-                            println("resumed")
                             remove(coroutineGraph)
                         }
                     })
@@ -67,25 +65,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             if (dispatcherToCoroutineDataListMap[i.descriptor.dispatcher!!] == null) {
                 dispatcherToCoroutineDataListMap[i.descriptor.dispatcher!!] = mutableListOf()
             }
-            println("coroutineInfoDataList (Active Thread): ${i.activeThread}")
-            println("coroutineInfoDataList (Creation Stack Trace): ${i.creationStackTrace}")
-            println("coroutineInfoDataList (Stack Trace): ${i.stackTrace}")
-            println()
-
-            for (j in i.stackTrace) {
-                println("stacktrace $j, stacktracelocation: ${j.location}")
-            }
-
-            println()
-            println("coroutineInfoDataList (descriptor): ${i.descriptor}")
-            println("coroutineInfoDataList (Top Frame Variables): ${i.topFrameVariables}")
-            println()
 
             dispatcherToCoroutineDataListMap[i.descriptor.dispatcher]?.add(i)
             i.descriptor.dispatcher?.let { dispatchers.add(it) }
         }
-
-        println("cache state: ${coroutineInfoCache.state}")
 
         val dispatcherList = dispatchers.toTypedArray()
         val mapOfParallelStackTree = mutableMapOf<String, Tree<ParallelStackNode>>()
@@ -101,10 +84,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             if (rootValue != null) {
                 tree.insert(rootValue)
             }
-
-            println("dispatcherToCoroutineDataListMap[i]: ${dispatcherToCoroutineDataListMap[i]}")
-            println("root value: $rootValue")
-            println("i dispatcher: $i")
 
             generateParallelStackTree(tree, rootValue, positionOfStackFrame)
 
@@ -175,7 +154,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             return
         }
 
-//        rows[level].add(JButton(node.value.toString()))
         if (node.value.stacktrace.isNotEmpty()) {
             addCoroutineInfoBox(node.value, rows[level])
         }
@@ -199,39 +177,9 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         val coroutineListView = JBList<String>(coroutineList)
 
-//        var maxLengthStackTrace = 0
-//        for (i in value.stacktrace) {
-//            if (i?.length!! > maxLengthStackTrace) {
-//                maxLengthStackTrace = i.length
-//            }
-//        }
-
-//        val headerBox = JLabel(headerText)
-//        headerBox.border = BorderFactory.createCompoundBorder(
-//            LineBorder(Color.BLACK, 1),
-//            EmptyBorder(2, 2, 2, 2)
-//        )
-//
-//        headerBox.font = Font("Arial", Font.ITALIC, 14)
-
-//        childBox.add(headerBox)
-//
-//        for (i in value.stacktrace) {
-////            val childBoxFrame = JLabel(addWhiteSpaces(i, maxLengthStackTrace - i!!.length))
-//            val childBoxFrame = JLabel(i)
-//            childBoxFrame.border = BorderFactory.createCompoundBorder(
-//                LineBorder(Color.BLACK, 1),
-//                EmptyBorder(2, 4, 2, 4)
-//            )
-//            childBox.add(childBoxFrame)
-//        }
-
-        coroutineListView.setCellRenderer(SeparatedListCellRenderer())
+        coroutineListView.cellRenderer = SeparatedListCellRenderer()
         val scrollPane = JBScrollPane(coroutineListView)
 
-        // Create a border for the scroll pane
-
-        // Create a border for the scroll pane
         val border = BorderFactory.createLineBorder(Color.BLACK, 1)
         scrollPane.border = border
 
@@ -260,14 +208,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         companion object {
             private val ITEM_BORDER = BorderFactory.createMatteBorder(0, 0, 1, 0, Color.GRAY)
         }
-    }
-
-    private fun addWhiteSpaces(i: String?, spaces: Int): String? {
-        var response = i
-        for (i in 1..spaces) {
-            response += " "
-        }
-        return response
     }
 
     private fun generateParallelStackTree(
@@ -382,37 +322,5 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
 
         return length
-    }
-
-    private fun drawArrowBetweenComponents(container: Container) {
-        val arrowComponent = object : JComponent() {
-            override fun paintComponent(g: Graphics) {
-                super.paintComponent(g)
-
-                val g2d = g as Graphics2D
-                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-
-//                val sourceBounds = SwingUtilities.convertRectangle(source.parent, source.bounds, container)
-//                val targetBounds = SwingUtilities.convertRectangle(target.parent, target.bounds, container)
-
-//                val x1 = sourceBounds.x + sourceBounds.width / 2
-//                val y1 = sourceBounds.y + sourceBounds.height
-//                val x2 = targetBounds.x + targetBounds.width / 2
-//                val y2 = targetBounds.y
-
-                g2d.color = Color.RED
-                g2d.stroke = BasicStroke(2.0f)
-
-                g2d.drawLine(0, 0, 5, 5)
-
-                val arrowSize = 4
-                val arrowhead = Polygon()
-                arrowhead.addPoint(5, 5)
-                arrowhead.addPoint(5 - arrowSize, 5 - arrowSize)
-                arrowhead.addPoint(5 + arrowSize, 5 - arrowSize)
-                g2d.fill(arrowhead)
-            }
-        }
-        container.add(arrowComponent)
     }
 }
