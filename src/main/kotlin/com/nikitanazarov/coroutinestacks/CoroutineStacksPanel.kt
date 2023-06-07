@@ -10,17 +10,15 @@ import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanelWithEmptyText
 import com.intellij.ui.components.JBScrollPane
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
 import java.awt.*
 import javax.swing.*
+import kotlin.script.experimental.api.ResultValue
 
 
 class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
-    private var coroutineGraph: JComponent? = null
+    val coroutineGraph = Box.createVerticalBox()
 
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -39,7 +37,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                         }
 
                         override fun resumed(suspendContext: SuspendContext?) {
-                            remove(coroutineGraph)
+                            coroutineGraph.removeAll()
                         }
                     })
                 }
@@ -47,55 +45,62 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 override fun sessionRemoved(session: DebuggerSession) {
                     emptyText.text = CoroutineStacksBundle.message("no.java.debug.process.is.running")
                     emptyText.component.isVisible = true
-                    remove(coroutineGraph)
+                    coroutineGraph.removeAll()
                 }
             })
     }
 
     private fun buildCoroutineGraph(suspendContext: SuspendContext) {
+        val suspendContextImpl = suspendContext as? SuspendContextImpl ?: run {
+            emptyText.text = CoroutineStacksBundle.message("coroutine.stacks.could.not.be.built")
+            return
+        }
 
         val coroutineInfoCache = CoroutineDebugProbesProxy(suspendContext as SuspendContextImpl).dumpCoroutines()
 
         val coroutineInfoDataList = coroutineInfoCache.cache
         val dispatchers = mutableSetOf<String>()
 
-        val dispatcherToCoroutineDataListMap = mutableMapOf<String, MutableList<CoroutineInfoData>>()
+        val dispatcherToCoroutineDataList = mutableMapOf<String, MutableList<CoroutineInfoData>>()
 
-        for (i in coroutineInfoDataList) {
-            if (dispatcherToCoroutineDataListMap[i.descriptor.dispatcher!!] == null) {
-                dispatcherToCoroutineDataListMap[i.descriptor.dispatcher!!] = mutableListOf()
-            }
-
-            dispatcherToCoroutineDataListMap[i.descriptor.dispatcher]?.add(i)
-            i.descriptor.dispatcher?.let { dispatchers.add(it) }
+        for (info in coroutineInfoDataList) {
+            val dispatcher = info.descriptor.dispatcher ?: continue
+            dispatcherToCoroutineDataList.computeIfAbsent(dispatcher) { mutableListOf() }.add(info)
+            dispatchers.add(dispatcher)
         }
 
         val dispatcherList = dispatchers.toTypedArray()
-        val mapOfParallelStackTree = mutableMapOf<String, Tree<ParallelStackNode>>()
+        val dispatcherToCoroutineStacksTree = mutableMapOf<String, Tree<CoroutineStacksNode>>()
 
-        for (i in dispatcherList) {
+        for (dispatcher in dispatcherList) {
 
-            val tree = Tree<ParallelStackNode>()
-
-            val positionOfStackFrame = 0
+            val tree = Tree<CoroutineStacksNode>()
 
             val rootValue =
-                dispatcherToCoroutineDataListMap[i]?.let { ParallelStackNode(stacktrace = mutableListOf(), additionalData = it) }
+                dispatcherToCoroutineDataList[dispatcher]?.let { CoroutineStacksNode(stackTrace = mutableListOf(), additionalData = it) }
             if (rootValue != null) {
                 tree.insert(rootValue)
             }
 
-            generateParallelStackTree(tree, rootValue, positionOfStackFrame)
+            generateParallelStackTree(tree, rootValue, 0)
 
             printTree(tree.root, 0)
 
-            mapOfParallelStackTree[i] = tree
+            dispatcherToCoroutineStacksTree[dispatcher] = tree
 
         }
 
-        val dispatcherLabel = JLabel("Select Dispatcher:  ")
+        buildCoroutineStacksToolWindowView(dispatcherList, dispatcherToCoroutineStacksTree)
 
-        val parallelStackWindowHeader = Box.createHorizontalBox()
+    }
+
+    private fun buildCoroutineStacksToolWindowView(
+        dispatcherList: Array<String>,
+        dispatcherToCoroutineStacksTree: MutableMap<String, Tree<CoroutineStacksNode>>
+    ) {
+        val dispatcherLabel = JLabel(CoroutineStacksBundle.message("select.dispatcher"))
+
+        val coroutineStacksWindowHeader = Box.createHorizontalBox()
 
         val dispatcherDropdownMenu = ComboBox(dispatcherList)
         val comboBoxSize = Dimension(150, 25)
@@ -103,58 +108,59 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         dispatcherDropdownMenu.maximumSize = comboBoxSize
         dispatcherDropdownMenu.minimumSize = comboBoxSize
 
-        dispatcherDropdownMenu.addActionListener{
+        dispatcherDropdownMenu.addActionListener {
             val selectedItem = dispatcherDropdownMenu.selectedItem
         }
 
-        parallelStackWindowHeader.add(dispatcherLabel)
-        parallelStackWindowHeader.add(dispatcherDropdownMenu)
+        coroutineStacksWindowHeader.add(dispatcherLabel)
+        coroutineStacksWindowHeader.add(dispatcherDropdownMenu)
 
-        coroutineGraph = Box.createVerticalBox()
-        coroutineGraph?.add(parallelStackWindowHeader)
+        coroutineGraph?.add(coroutineStacksWindowHeader)
 
-        val parallelStackWindow = Box.createVerticalBox()
-        buildParallelStackWindow(mapOfParallelStackTree, parallelStackWindow, dispatcherList)
+        val coroutineStacksView = Box.createVerticalBox()
+        buildCoroutineStacksView(dispatcherToCoroutineStacksTree, coroutineStacksView, dispatcherList)
 
-        coroutineGraph?.add(parallelStackWindow)
+        coroutineGraph?.add(coroutineStacksView)
 
         add(coroutineGraph)
+}
 
-    }
-
-    private fun buildParallelStackWindow(
-        mapOfParallelStackTree: MutableMap<String, Tree<ParallelStackNode>>,
-        parallelStackWindow: Box?,
+    private fun buildCoroutineStacksView(
+        mapOfParallelStackTree: MutableMap<String, Tree<CoroutineStacksNode>>,
+        coroutineStacksView: Box,
         dispatcherList: Array<String>
     ) {
 
-        val tree = mapOfParallelStackTree[dispatcherList[0]]
-        val lengthOfTree = getTreeLength(tree?.root)
+        if (dispatcherList.isEmpty()) {
+            return
+        }
 
+        val tree = mapOfParallelStackTree[dispatcherList[0]] ?: return
         val rows = mutableListOf<Box>()
-        for (i in 1..lengthOfTree) {
+        for (i in 1..tree.getHeight()) {
             rows.add(Box.createHorizontalBox())
         }
 
-        addCoroutineInfoToParallelStackWindow(tree?.root, rows, 0)
+        tree.root?.let { addCoroutineInfoToParallelStackWindow(it, rows, 0) }
 
         for (i in rows.reversed()) {
-            parallelStackWindow?.add(i)
-            parallelStackWindow?.add(Box.createVerticalStrut(25))
+            coroutineStacksView?.add(i)
+            coroutineStacksView?.add(Box.createVerticalStrut(25))
         }
 
     }
 
     private fun addCoroutineInfoToParallelStackWindow(
-        node: CoroutineStacksPanel.TreeNode<CoroutineStacksPanel.ParallelStackNode>?,
+        node: CoroutineStacksPanel.TreeNode<CoroutineStacksPanel.CoroutineStacksNode>,
         rows: MutableList<Box>,
-        level: Int) {
+        level: Int
+    ) {
 
         if (node == null) {
             return
         }
 
-        if (node.value.stacktrace.isNotEmpty()) {
+        if (node.value.stackTrace.isNotEmpty()) {
             addCoroutineInfoBox(node.value, rows[level])
         }
         for (child in node.children) {
@@ -164,18 +170,19 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     }
 
     private fun addCoroutineInfoBox(
-        value: CoroutineStacksPanel.ParallelStackNode,
-        box: Box) {
+        value: CoroutineStacksPanel.CoroutineStacksNode,
+        box: Box
+    ) {
 
         val headerText = "${value.additionalData.size} Coroutines"
-        val coroutineList = mutableListOf<String>()
-        coroutineList.add(headerText)
+        val stackFrames = mutableListOf<String>()
+        stackFrames.add(headerText)
 
-        for (i in value.stacktrace) {
-            i?.let { coroutineList.add(it) }
+        for (i in value.stackTrace) {
+            i?.let { stackFrames.add(it) }
         }
 
-        val coroutineListView = JBList<String>(coroutineList)
+        val coroutineListView = JBList<String>(stackFrames)
 
         coroutineListView.cellRenderer = SeparatedListCellRenderer()
         val scrollPane = JBScrollPane(coroutineListView)
@@ -211,46 +218,42 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     }
 
     private fun generateParallelStackTree(
-        tree: CoroutineStacksPanel.Tree<CoroutineStacksPanel.ParallelStackNode>,
-        rootValue: CoroutineStacksPanel.ParallelStackNode?,
-        positionOfStackFrame: Int) {
+        tree: CoroutineStacksPanel.Tree<CoroutineStacksPanel.CoroutineStacksNode>,
+        rootValue: CoroutineStacksPanel.CoroutineStacksNode?,
+        positionOfStackFrame: Int
+    ) {
 
-        val idToStackFramesMap = mutableMapOf<CoroutineInfoData, String>()
-        if (rootValue != null) {
-            for (k in rootValue.additionalData!!) {
-                if (k.stackTrace.size > positionOfStackFrame)
-                    idToStackFramesMap[k] = k.stackTrace[k.stackTrace.size -1 - positionOfStackFrame].toString()
-            }
+        val dataToStackFrame = mutableMapOf<CoroutineInfoData, String>()
+        if (rootValue == null) {
+            return
         }
+            for (data in rootValue.additionalData) {
+                if (data.stackTrace.size > positionOfStackFrame)
+                    dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
+            }
 
-        println("idToStackFramesMap: $idToStackFramesMap")
-
-        val groupedPositions = idToStackFramesMap.entries.groupBy { it.value }.values.map { list ->
+        val groupedPositions = dataToStackFrame.entries.groupBy { it.value }.values.map { list ->
             list.map { it.key }
         }
         println("grouped positions: $groupedPositions")
 
         for (i in groupedPositions) {
-            if (rootValue != null) {
-                if (groupedPositions.size == 1 && rootValue.stacktrace.isNotEmpty()) {
-                    rootValue?.stacktrace?.add(idToStackFramesMap[i[0]])
+                if (groupedPositions.size == 1 && rootValue.stackTrace.isNotEmpty()) {
+                    rootValue?.stackTrace?.add(dataToStackFrame[i[0]]!!)
                     generateParallelStackTree(tree, rootValue, positionOfStackFrame + 1)
-                } else if (groupedPositions.size > 1 || rootValue?.stacktrace?.isEmpty() == true) {
-                    val childValue = ParallelStackNode(stacktrace = mutableListOf(idToStackFramesMap[i[0]]), additionalData = i)
+                } else if (groupedPositions.size > 1 || rootValue.stackTrace.isEmpty()) {
+                    val childValue = CoroutineStacksNode(stackTrace = mutableListOf(dataToStackFrame[i[0]]!!), additionalData = i)
                     println("childValue in recursion: $childValue")
                     println()
-                    if (rootValue != null) {
-                        tree.insert(childValue, rootValue)
-                    }
+                    tree.insert(childValue, rootValue)
                     generateParallelStackTree(tree, childValue, positionOfStackFrame + 1)
                 }
-            }
         }
 
     }
 
-    data class ParallelStackNode(
-        val stacktrace: MutableList<String?>,
+    data class CoroutineStacksNode(
+        val stackTrace: MutableList<String>,
         val additionalData: List<CoroutineInfoData>
     )
 
@@ -296,9 +299,13 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             }
             return null
         }
+
+        fun getHeight() : Int {
+            return root?.getHeight() ?: 0
+        }
     }
 
-    private fun printTree(node: TreeNode<ParallelStackNode>?, level: Int) {
+    private fun printTree(node: TreeNode<CoroutineStacksNode>?, level: Int) {
         if (node == null) {
             println("no children")
             return
@@ -309,18 +316,20 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             printTree(child, level + 1)
         }
     }
+}
 
-    private fun <T> getTreeLength(root: TreeNode<T>?): Int {
-        if (root == null) {
-            return 0
-        }
-
-        var length = 1
-
-        for (child in root.children) {
-            length += getTreeLength(child)
-        }
-
-        return length
+private fun <T> CoroutineStacksPanel.TreeNode<T>.getHeight(): Int {
+    if (children.isEmpty()) {
+        return 0
     }
+
+    var maxHeight = 0
+    for (child in children) {
+        val height = child.getHeight()
+        if (height > maxHeight) {
+            maxHeight = height
+        }
+    }
+
+    return maxHeight + 1
 }
