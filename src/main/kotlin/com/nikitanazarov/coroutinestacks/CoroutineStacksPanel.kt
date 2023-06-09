@@ -12,9 +12,11 @@ import com.intellij.ui.components.JBPanelWithEmptyText
 import com.intellij.ui.components.JBScrollPane
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
-import java.awt.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Dimension
+import java.util.*
 import javax.swing.*
-import kotlin.script.experimental.api.ResultValue
 
 
 class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
@@ -69,10 +71,9 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             dispatchers.add(dispatcher)
         }
 
-        val dispatcherList = dispatchers.toTypedArray()
         val dispatcherToCoroutineStacksTree = mutableMapOf<String, Tree<CoroutineStacksNode>>()
 
-        for (dispatcher in dispatcherList) {
+        for (dispatcher in dispatchers) {
 
             val tree = Tree<CoroutineStacksNode>()
 
@@ -90,20 +91,20 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         }
 
-        buildCoroutineStacksToolWindowView(dispatcherList, dispatcherToCoroutineStacksTree)
+        buildCoroutineStacksToolWindowView(dispatchers, dispatcherToCoroutineStacksTree)
 
     }
 
     private fun buildCoroutineStacksToolWindowView(
-        dispatcherList: Array<String>,
+        dispatchers: MutableSet<String>,
         dispatcherToCoroutineStacksTree: MutableMap<String, Tree<CoroutineStacksNode>>
     ) {
         val dispatcherLabel = JLabel(CoroutineStacksBundle.message("select.dispatcher"))
 
         val coroutineStacksWindowHeader = Box.createHorizontalBox()
 
-        val dispatcherDropdownMenu = ComboBox(dispatcherList)
-        val comboBoxSize = Dimension(150, 25)
+        val dispatcherDropdownMenu = ComboBox(dispatchers.toTypedArray())
+        val comboBoxSize = Dimension(Constants.comboBoxHeight, Constants.comboBoxWidth)
         dispatcherDropdownMenu.preferredSize = comboBoxSize
         dispatcherDropdownMenu.maximumSize = comboBoxSize
         dispatcherDropdownMenu.minimumSize = comboBoxSize
@@ -118,7 +119,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         coroutineGraph?.add(coroutineStacksWindowHeader)
 
         val coroutineStacksView = Box.createVerticalBox()
-        buildCoroutineStacksView(dispatcherToCoroutineStacksTree, coroutineStacksView, dispatcherList)
+        buildCoroutineStacksView(dispatcherToCoroutineStacksTree, coroutineStacksView, dispatchers)
 
         coroutineGraph?.add(coroutineStacksView)
 
@@ -128,53 +129,60 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     private fun buildCoroutineStacksView(
         mapOfParallelStackTree: MutableMap<String, Tree<CoroutineStacksNode>>,
         coroutineStacksView: Box,
-        dispatcherList: Array<String>
+        dispatchers: MutableSet<String>
     ) {
 
-        if (dispatcherList.isEmpty()) {
+        if (dispatchers.isEmpty()) {
             return
         }
 
-        val tree = mapOfParallelStackTree[dispatcherList[0]] ?: return
+        // code is incomplete, a coroutine stack view will show graphs for all possible dispatchers, but here
+        // the graph will be shown for only the first dispatcher in the list.
+        // Implement the functionality to build graph for all dispatchers. Fix this in next commit.
+
+        var dispatchersList = dispatchers.toTypedArray()
+        val tree = mapOfParallelStackTree[dispatchersList[0]] ?: return
+
         val rows = mutableListOf<Box>()
         for (i in 1..tree.getHeight()) {
             rows.add(Box.createHorizontalBox())
         }
 
-        tree.root?.let { addCoroutineInfoToParallelStackWindow(it, rows, 0) }
+        tree.root?.let { addCoroutineInfoToCoroutineStackWindow(it, rows) }
 
         for (i in rows.reversed()) {
             coroutineStacksView?.add(i)
-            coroutineStacksView?.add(Box.createVerticalStrut(25))
+            coroutineStacksView?.add(Box.createVerticalStrut(Constants.boxVerticalStruct))
         }
 
     }
 
-    private fun addCoroutineInfoToParallelStackWindow(
-        node: CoroutineStacksPanel.TreeNode<CoroutineStacksPanel.CoroutineStacksNode>,
-        rows: MutableList<Box>,
-        level: Int
+    private fun addCoroutineInfoToCoroutineStackWindow(
+        rootNode: TreeNode<CoroutineStacksNode>,
+        rows: MutableList<Box>
     ) {
+        val stack = Stack<Pair<TreeNode<CoroutineStacksNode>, Int>>()
+        stack.push(rootNode to 0)
 
-        if (node == null) {
-            return
-        }
+        while (!stack.isEmpty()) {
+            val (node, level) = stack.pop()
 
-        if (node.value.stackTrace.isNotEmpty()) {
-            addCoroutineInfoBox(node.value, rows[level])
-        }
-        for (child in node.children) {
-            addCoroutineInfoToParallelStackWindow(child, rows,level + 1)
-        }
+            if (node.value.stackTrace.isNotEmpty()) {
+                addCoroutineInfoBox(node.value, rows[level])
+            }
 
+            for (child in node.children) {
+                stack.push(child to level + 1)
+            }
+        }
     }
 
     private fun addCoroutineInfoBox(
-        value: CoroutineStacksPanel.CoroutineStacksNode,
+        value: CoroutineStacksNode,
         box: Box
     ) {
 
-        val headerText = "${value.additionalData.size} Coroutines"
+        val headerText = CoroutineStacksBundle.message("number.of.coroutines", value.additionalData.size)
         val stackFrames = mutableListOf<String>()
         stackFrames.add(headerText)
 
@@ -184,18 +192,22 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         val coroutineListView = JBList<String>(stackFrames)
 
-        coroutineListView.cellRenderer = SeparatedListCellRenderer()
+        if (cellRenderer != null)
+            coroutineListView.cellRenderer = cellRenderer
+
         val scrollPane = JBScrollPane(coroutineListView)
 
-        val border = BorderFactory.createLineBorder(Color.BLACK, 1)
+        val border = BorderFactory.createLineBorder(Color.BLACK, Constants.borderWidth)
         scrollPane.border = border
 
         box.add(scrollPane)
-        box.add(Box.createHorizontalStrut(120))
+        box.add(Box.createHorizontalStrut(Constants.boxHorizontalStruct))
 
     }
 
-    internal class SeparatedListCellRenderer : DefaultListCellRenderer() {
+    private val cellRenderer = object : DefaultListCellRenderer() {
+        private val ITEM_BORDER = BorderFactory.createMatteBorder(0, 0, 1, 0, Color.GRAY)
+
         override fun getListCellRendererComponent(
             list: JList<*>,
             value: Any,
@@ -205,15 +217,11 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         ): Component {
             val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
             if (index < list.model.size - 1) {
-                (renderer as JComponent).border = ITEM_BORDER
+                (renderer as? JComponent)?.border = ITEM_BORDER
             } else {
-                (renderer as JComponent).border = null
+                (renderer as? JComponent)?.border = null
             }
             return renderer
-        }
-
-        companion object {
-            private val ITEM_BORDER = BorderFactory.createMatteBorder(0, 0, 1, 0, Color.GRAY)
         }
     }
 
@@ -232,9 +240,13 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
             }
 
-        val groupedPositions = dataToStackFrame.entries.groupBy { it.value }.values.map { list ->
-            list.map { it.key }
-        }
+        val groupedPositions = dataToStackFrame.entries
+            .groupBy { it.value }
+            .values
+            .map { list ->
+                list.map { it.key }
+            }
+
         println("grouped positions: $groupedPositions")
 
         for (i in groupedPositions) {
@@ -323,13 +335,21 @@ private fun <T> CoroutineStacksPanel.TreeNode<T>.getHeight(): Int {
         return 0
     }
 
+    val stack = Stack<Pair<CoroutineStacksPanel.TreeNode<T>, Int>>()
+    stack.push(this to 1)
     var maxHeight = 0
-    for (child in children) {
-        val height = child.getHeight()
+
+    while (!stack.isEmpty()) {
+        val (node, height) = stack.pop()
+
         if (height > maxHeight) {
             maxHeight = height
         }
+
+        for (child in node.children) {
+            stack.push(child to height + 1)
+        }
     }
 
-    return maxHeight + 1
+    return maxHeight
 }
