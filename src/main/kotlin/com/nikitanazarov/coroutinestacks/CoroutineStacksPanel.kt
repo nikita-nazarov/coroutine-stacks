@@ -7,12 +7,12 @@ import com.intellij.debugger.impl.DebuggerManagerListener
 import com.intellij.debugger.impl.DebuggerSession
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanelWithEmptyText
 import com.intellij.ui.components.JBScrollPane
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
-import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.util.*
@@ -20,7 +20,27 @@ import javax.swing.*
 
 
 class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
-    val coroutineGraph = Box.createVerticalBox()
+    private val cellRenderer = object : DefaultListCellRenderer() {
+        private val ITEM_BORDER = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
+
+        override fun getListCellRendererComponent(
+            list: JList<*>,
+            value: Any,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): Component {
+            val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+            if (index < list.model.size - 1) {
+                (renderer as? JComponent)?.border = ITEM_BORDER
+            } else {
+                (renderer as? JComponent)?.border = null
+            }
+            return renderer
+        }
+    }
+
+    private val coroutineGraph = Box.createVerticalBox()
 
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -57,8 +77,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             emptyText.text = CoroutineStacksBundle.message("coroutine.stacks.could.not.be.built")
             return
         }
-
-        val coroutineInfoCache = CoroutineDebugProbesProxy(suspendContext as SuspendContextImpl).dumpCoroutines()
+        val coroutineInfoCache = CoroutineDebugProbesProxy(suspendContextImpl).dumpCoroutines()
 
         val coroutineInfoDataList = coroutineInfoCache.cache
         val dispatchers = mutableSetOf<String>()
@@ -76,7 +95,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         for (dispatcher in dispatchers) {
 
             val tree = Tree<CoroutineStacksNode>()
-
             val rootValue =
                 dispatcherToCoroutineDataList[dispatcher]?.let { CoroutineStacksNode(stackTrace = mutableListOf(), additionalData = it) }
             if (rootValue != null) {
@@ -92,7 +110,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
 
         buildCoroutineStacksToolWindowView(dispatchers, dispatcherToCoroutineStacksTree)
-
     }
 
     private fun buildCoroutineStacksToolWindowView(
@@ -108,10 +125,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         dispatcherDropdownMenu.preferredSize = comboBoxSize
         dispatcherDropdownMenu.maximumSize = comboBoxSize
         dispatcherDropdownMenu.minimumSize = comboBoxSize
-
-        dispatcherDropdownMenu.addActionListener {
-            val selectedItem = dispatcherDropdownMenu.selectedItem
-        }
 
         coroutineStacksWindowHeader.add(dispatcherLabel)
         coroutineStacksWindowHeader.add(dispatcherDropdownMenu)
@@ -131,7 +144,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         coroutineStacksView: Box,
         dispatchers: MutableSet<String>
     ) {
-
         if (dispatchers.isEmpty()) {
             return
         }
@@ -140,7 +152,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         // the graph will be shown for only the first dispatcher in the list.
         // Implement the functionality to build graph for all dispatchers. Fix this in next commit.
 
-        var dispatchersList = dispatchers.toTypedArray()
+        val dispatchersList = dispatchers.toTypedArray()
         val tree = mapOfParallelStackTree[dispatchersList[0]] ?: return
 
         val rows = mutableListOf<Box>()
@@ -151,10 +163,9 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         tree.root?.let { addCoroutineInfoToCoroutineStackWindow(it, rows) }
 
         for (i in rows.reversed()) {
-            coroutineStacksView?.add(i)
-            coroutineStacksView?.add(Box.createVerticalStrut(Constants.boxVerticalStruct))
+            coroutineStacksView.add(i)
+            coroutineStacksView.add(Box.createVerticalStrut(Constants.boxVerticalStruct))
         }
-
     }
 
     private fun addCoroutineInfoToCoroutineStackWindow(
@@ -177,60 +188,31 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
     }
 
-    private fun addCoroutineInfoBox(
-        value: CoroutineStacksNode,
-        box: Box
-    ) {
-
-        val headerText = CoroutineStacksBundle.message("number.of.coroutines", value.additionalData.size)
+    private fun addCoroutineInfoBox(node: CoroutineStacksNode, box: Box) {
+        val headerText = CoroutineStacksBundle.message("number.of.coroutines", node.additionalData.size)
         val stackFrames = mutableListOf<String>()
         stackFrames.add(headerText)
 
-        for (i in value.stackTrace) {
-            i?.let { stackFrames.add(it) }
-        }
+        stackFrames.addAll(node.stackTrace)
 
         val coroutineListView = JBList<String>(stackFrames)
 
-        if (cellRenderer != null)
-            coroutineListView.cellRenderer = cellRenderer
+        coroutineListView.cellRenderer = cellRenderer
 
         val scrollPane = JBScrollPane(coroutineListView)
 
-        val border = BorderFactory.createLineBorder(Color.BLACK, Constants.borderWidth)
+        val border = BorderFactory.createLineBorder(JBColor.BLACK, Constants.borderWidth)
         scrollPane.border = border
 
         box.add(scrollPane)
         box.add(Box.createHorizontalStrut(Constants.boxHorizontalStruct))
-
-    }
-
-    private val cellRenderer = object : DefaultListCellRenderer() {
-        private val ITEM_BORDER = BorderFactory.createMatteBorder(0, 0, 1, 0, Color.GRAY)
-
-        override fun getListCellRendererComponent(
-            list: JList<*>,
-            value: Any,
-            index: Int,
-            isSelected: Boolean,
-            cellHasFocus: Boolean
-        ): Component {
-            val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            if (index < list.model.size - 1) {
-                (renderer as? JComponent)?.border = ITEM_BORDER
-            } else {
-                (renderer as? JComponent)?.border = null
-            }
-            return renderer
-        }
     }
 
     private fun generateParallelStackTree(
-        tree: CoroutineStacksPanel.Tree<CoroutineStacksPanel.CoroutineStacksNode>,
-        rootValue: CoroutineStacksPanel.CoroutineStacksNode?,
+        tree: Tree<CoroutineStacksNode>,
+        rootValue: CoroutineStacksNode?,
         positionOfStackFrame: Int
     ) {
-
         val dataToStackFrame = mutableMapOf<CoroutineInfoData, String>()
         if (rootValue == null) {
             return
@@ -240,35 +222,36 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
             }
 
-        val groupedPositions = dataToStackFrame.entries
-            .groupBy { it.value }
-            .values
-            .map { list ->
-                list.map { it.key }
-            }
+        val entries = dataToStackFrame.entries
 
-        println("grouped positions: $groupedPositions")
+        val groupedByValue = entries.groupBy { it.value }
 
-        for (i in groupedPositions) {
-                if (groupedPositions.size == 1 && rootValue.stackTrace.isNotEmpty()) {
-                    rootValue?.stackTrace?.add(dataToStackFrame[i[0]]!!)
-                    generateParallelStackTree(tree, rootValue, positionOfStackFrame + 1)
-                } else if (groupedPositions.size > 1 || rootValue.stackTrace.isEmpty()) {
-                    val childValue = CoroutineStacksNode(stackTrace = mutableListOf(dataToStackFrame[i[0]]!!), additionalData = i)
-                    println("childValue in recursion: $childValue")
-                    println()
-                    tree.insert(childValue, rootValue)
-                    generateParallelStackTree(tree, childValue, positionOfStackFrame + 1)
-                }
+        val valuesList = groupedByValue.values
+
+        val groupedPositions = valuesList.map { list ->
+            list.map { it.key }
         }
 
+        println("grouped positions: $entries")
+
+        for (i in groupedPositions) {
+            if (entries.size == 1 && rootValue.stackTrace.isNotEmpty()) {
+                rootValue.stackTrace.add(dataToStackFrame[i[0]]!!)
+                generateParallelStackTree(tree, rootValue, positionOfStackFrame + 1)
+            } else if (entries.size > 1) {
+                val childValue = CoroutineStacksNode(stackTrace = mutableListOf(dataToStackFrame[i[0]]!!), additionalData = i)
+                println("childValue in recursion: $childValue")
+                println()
+                tree.insert(childValue, rootValue)
+                generateParallelStackTree(tree, childValue, positionOfStackFrame + 1)
+            }
+        }
     }
 
     data class CoroutineStacksNode(
         val stackTrace: MutableList<String>,
         val additionalData: List<CoroutineInfoData>
     )
-
     class TreeNode<T>(val value: T) {
         val children: MutableList<TreeNode<T>> = mutableListOf()
 
@@ -279,7 +262,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
     class Tree<T> {
         var root: TreeNode<T>? = null
-
         fun insert(value: T) {
             val newNode = TreeNode(value)
             if (root == null) {
