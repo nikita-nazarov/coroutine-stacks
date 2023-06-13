@@ -93,7 +93,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val dispatcherToCoroutineStacksTree = mutableMapOf<String, Tree<CoroutineStacksNode>>()
 
         for (dispatcher in dispatchers) {
-
             val tree = Tree<CoroutineStacksNode>()
             val rootValue =
                 dispatcherToCoroutineDataList[dispatcher]?.let { CoroutineStacksNode(stackTrace = mutableListOf(), additionalData = it) }
@@ -106,7 +105,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             printTree(tree.root, 0)
 
             dispatcherToCoroutineStacksTree[dispatcher] = tree
-
         }
 
         buildCoroutineStacksToolWindowView(dispatchers, dispatcherToCoroutineStacksTree)
@@ -162,8 +160,8 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         tree.root?.let { addCoroutineInfoToCoroutineStackWindow(it, rows) }
 
-        for (i in rows.reversed()) {
-            coroutineStacksView.add(i)
+        for (row in rows.reversed()) {
+            coroutineStacksView.add(row)
             coroutineStacksView.add(Box.createVerticalStrut(Constants.boxVerticalStruct))
         }
     }
@@ -217,29 +215,25 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         if (rootValue == null) {
             return
         }
-            for (data in rootValue.additionalData) {
-                if (data.stackTrace.size > positionOfStackFrame)
-                    dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
-            }
+        for (data in rootValue.additionalData) {
+            if (data.stackTrace.size > positionOfStackFrame)
+                dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
+        }
 
         val entries = dataToStackFrame.entries
 
         val groupedByValue = entries.groupBy { it.value }
 
-        val valuesList = groupedByValue.values
-
-        val groupedPositions = valuesList.map { list ->
+        val groupedPositions = groupedByValue.map { (_, list) ->
             list.map { it.key }
         }
 
-        println("grouped positions: $entries")
-
-        for (i in groupedPositions) {
+        for (groupedPosition in groupedPositions) {
             if (entries.size == 1 && rootValue.stackTrace.isNotEmpty()) {
-                rootValue.stackTrace.add(dataToStackFrame[i[0]]!!)
+                rootValue.stackTrace.add(dataToStackFrame[groupedPosition[0]]!!)
                 generateParallelStackTree(tree, rootValue, positionOfStackFrame + 1)
             } else if (entries.size > 1) {
-                val childValue = CoroutineStacksNode(stackTrace = mutableListOf(dataToStackFrame[i[0]]!!), additionalData = i)
+                val childValue = CoroutineStacksNode(stackTrace = mutableListOf(dataToStackFrame[groupedPosition[0]]!!), additionalData = groupedPosition)
                 println("childValue in recursion: $childValue")
                 println()
                 tree.insert(childValue, rootValue)
