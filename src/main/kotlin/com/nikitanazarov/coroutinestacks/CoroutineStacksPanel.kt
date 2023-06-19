@@ -93,12 +93,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val dispatcherToCoroutineStacksTree = mutableMapOf<String, Tree<CoroutineStacksNode>>()
 
         for (dispatcher in dispatchers) {
-            val tree = Tree<CoroutineStacksNode>()
             val rootValue =
-                dispatcherToCoroutineDataList[dispatcher]?.let { CoroutineStacksNode(stackTrace = mutableListOf(), additionalData = it) }
-            if (rootValue != null) {
-                tree.insert(rootValue)
-            }
+                CoroutineStacksNode(stackTrace = mutableListOf(), additionalData = dispatcherToCoroutineDataList[dispatcher]!!)
+            val tree = Tree(TreeNode(rootValue))
+
 
             generateParallelStackTree(tree, rootValue, 0)
 
@@ -135,7 +133,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         coroutineGraph?.add(coroutineStacksView)
 
         add(coroutineGraph)
-}
+    }
 
     private fun buildCoroutineStacksView(
         mapOfParallelStackTree: MutableMap<String, Tree<CoroutineStacksNode>>,
@@ -158,7 +156,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             rows.add(Box.createHorizontalBox())
         }
 
-        tree.root?.let { addCoroutineInfoToCoroutineStackWindow(it, rows) }
+        addCoroutineInfoToCoroutineStackWindow(tree.root, rows)
 
         for (row in rows.reversed()) {
             coroutineStacksView.add(row)
@@ -173,7 +171,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val stack = Stack<Pair<TreeNode<CoroutineStacksNode>, Int>>()
         stack.push(rootNode to 0)
 
-        while (!stack.isEmpty()) {
+        while (stack.isNotEmpty()) {
             val (node, level) = stack.pop()
 
             if (node.value.stackTrace.isNotEmpty()) {
@@ -215,6 +213,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         if (rootValue == null) {
             return
         }
+
         for (data in rootValue.additionalData) {
             if (data.stackTrace.size > positionOfStackFrame)
                 dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
@@ -246,6 +245,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val stackTrace: MutableList<String>,
         val additionalData: List<CoroutineInfoData>
     )
+
     class TreeNode<T>(val value: T) {
         val children: MutableList<TreeNode<T>> = mutableListOf()
 
@@ -254,25 +254,12 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
     }
 
-    class Tree<T> {
-        var root: TreeNode<T>? = null
-        fun insert(value: T) {
-            val newNode = TreeNode(value)
-            if (root == null) {
-                root = newNode
-            } else {
-                throw UnsupportedOperationException("Insertion in a specific position is required for a general tree.")
-            }
-        }
+    class Tree<T>(val root: TreeNode<T>) {
 
         fun insert(value: T, parentValue: T) {
             val newNode = TreeNode(value)
-            if (root == null) {
-                root = newNode
-            } else {
-                val parentNode = findNode(root!!, parentValue)
-                parentNode?.addChild(newNode)
-            }
+            val parentNode = findNode(root, parentValue)
+            parentNode?.addChild(newNode)
         }
 
         private fun findNode(node: TreeNode<T>, value: T): TreeNode<T>? {
@@ -289,7 +276,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
 
         fun getHeight() : Int {
-            return root?.getHeight() ?: 0
+            return root.getHeight()
         }
     }
 
@@ -315,7 +302,7 @@ private fun <T> CoroutineStacksPanel.TreeNode<T>.getHeight(): Int {
     stack.push(this to 1)
     var maxHeight = 0
 
-    while (!stack.isEmpty()) {
+    while (stack.isNotEmpty()) {
         val (node, height) = stack.pop()
 
         if (height > maxHeight) {
