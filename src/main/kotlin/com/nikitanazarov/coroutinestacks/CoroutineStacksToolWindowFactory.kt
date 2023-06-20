@@ -79,6 +79,31 @@ private fun createExamplePanel(): JScrollPane {
         Separator(),
     )
 
+    val secondTree = listOf(
+        createList(),
+        Separator(),
+        createList(),
+            createList(),
+                createList(),
+                Separator(),
+            Separator(),
+        Separator(),
+        createList(),
+            createList(),
+                createList(),
+                Separator(),
+                createList(),
+                Separator(),
+            Separator(),
+            createList(),
+                createList(),
+                    createList(),
+                    Separator(),
+                Separator(),
+            Separator(),
+        Separator(),
+    )
+    secondTree.forEach { forest.add(it) }
     firstTree.forEach { forest.add(it) }
     forest.layout = ForestLayout()
     return JBScrollPane(forest)
