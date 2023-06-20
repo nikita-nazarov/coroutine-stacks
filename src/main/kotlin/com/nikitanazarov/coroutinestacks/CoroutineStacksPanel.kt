@@ -11,6 +11,10 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanelWithEmptyText
 import com.intellij.ui.components.JBScrollPane
+import com.nikitanazarov.coroutinestacks.ui.ContainerWithEdges
+import com.nikitanazarov.coroutinestacks.ui.ForestLayout
+import com.nikitanazarov.coroutinestacks.ui.Separator
+import com.sun.jdi.Location
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
 import java.awt.Component
@@ -97,42 +101,15 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 CoroutineStacksNode(stackTrace = mutableListOf(), additionalData = dispatcherToCoroutineDataList[dispatcher]!!)
             val tree = Tree(TreeNode(rootValue))
 
-
-            generateParallelStackTree(tree, rootValue, 0)
+            val root = Node(null, -1, mutableMapOf())
+            generateParallelStackTree( root, coroutineInfoDataList)
 
             printTree(tree.root, 0)
 
             dispatcherToCoroutineStacksTree[dispatcher] = tree
         }
 
-        buildCoroutineStacksToolWindowView(dispatchers, dispatcherToCoroutineStacksTree)
-    }
-
-    private fun buildCoroutineStacksToolWindowView(
-        dispatchers: MutableSet<String>,
-        dispatcherToCoroutineStacksTree: MutableMap<String, Tree<CoroutineStacksNode>>
-    ) {
-        val dispatcherLabel = JLabel(CoroutineStacksBundle.message("select.dispatcher"))
-
-        val coroutineStacksWindowHeader = Box.createHorizontalBox()
-
-        val dispatcherDropdownMenu = ComboBox(dispatchers.toTypedArray())
-        val comboBoxSize = Dimension(Constants.comboBoxHeight, Constants.comboBoxWidth)
-        dispatcherDropdownMenu.preferredSize = comboBoxSize
-        dispatcherDropdownMenu.maximumSize = comboBoxSize
-        dispatcherDropdownMenu.minimumSize = comboBoxSize
-
-        coroutineStacksWindowHeader.add(dispatcherLabel)
-        coroutineStacksWindowHeader.add(dispatcherDropdownMenu)
-
-        coroutineGraph?.add(coroutineStacksWindowHeader)
-
-        val coroutineStacksView = Box.createVerticalBox()
-        buildCoroutineStacksView(dispatcherToCoroutineStacksTree, coroutineStacksView, dispatchers)
-
-        coroutineGraph?.add(coroutineStacksView)
-
-        add(coroutineGraph)
+//        buildCoroutineStacksToolWindowView(dispatchers, dispatcherToCoroutineStacksTree)
     }
 
     private fun buildCoroutineStacksView(
@@ -205,41 +182,148 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     }
 
     private fun generateParallelStackTree(
-        tree: Tree<CoroutineStacksNode>,
-        rootValue: CoroutineStacksNode?,
-        positionOfStackFrame: Int
+        rootValue: Node,
+        coroutineDataList: MutableList<CoroutineInfoData>
     ) {
-        val dataToStackFrame = mutableMapOf<CoroutineInfoData, String>()
-        if (rootValue == null) {
-            return
-        }
-
-        for (data in rootValue.additionalData) {
-            if (data.stackTrace.size > positionOfStackFrame)
-                dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
-        }
-
-        val entries = dataToStackFrame.entries
-
-        val groupedByValue = entries.groupBy { it.value }
-
-        val groupedPositions = groupedByValue.map { (_, list) ->
-            list.map { it.key }
-        }
-
-        for (groupedPosition in groupedPositions) {
-            if (entries.size == 1 && rootValue.stackTrace.isNotEmpty()) {
-                rootValue.stackTrace.add(dataToStackFrame[groupedPosition[0]]!!)
-                generateParallelStackTree(tree, rootValue, positionOfStackFrame + 1)
-            } else if (entries.size > 1) {
-                val childValue = CoroutineStacksNode(stackTrace = mutableListOf(dataToStackFrame[groupedPosition[0]]!!), additionalData = groupedPosition)
-                println("childValue in recursion: $childValue")
-                println()
-                tree.insert(childValue, rootValue)
-                generateParallelStackTree(tree, childValue, positionOfStackFrame + 1)
+        for (coroutineData in coroutineDataList) {
+            var currentNode = rootValue
+            for (stackFrame in coroutineData.stackTrace.reversed()) {
+                val child = currentNode.children[stackFrame.location]
+                if (child != null) {
+                    child.num += 1
+                    currentNode = child
+                } else {
+                    val node = Node( stackFrame.location,1, mutableMapOf())
+                    currentNode.children[stackFrame.location] = node
+                    currentNode = node
+                }
             }
         }
+        var treeList: MutableList<MutableList<String>> = mutableListOf()
+        val stack = Stack<Pair<Node, Int>>()
+        val parentStack = Stack<Node>() // Stack to track parent nodes
+
+        var previousLevel = 1
+        var currentLevel = 1
+        var separatorCount = 1
+
+        stack.push(Pair(rootValue, 0))
+        val separList = mutableListOf<String>()
+        var k = -1
+
+        println("root $rootValue")
+        while (stack.isNotEmpty()) {
+            val (currentNode, level) = stack.pop()
+            val parent = if (parentStack.isNotEmpty()) parentStack.pop() else null
+            val indentation = "  ".repeat(level) // Indentation based on the level
+            println("$indentation StackFrame: ${currentNode.stackFrameLocation}, Num: ${currentNode.num}")
+
+            if (parent != null) {
+//                currentLevel = level
+//
+//                if (previousLevel == currentLevel) {
+//                    for (i in 1..separatorCount) {
+//                        treeList.add(mutableListOf("separator"))
+//                        k += 1
+//                    }
+//                    separatorCount = 1
+//                    if (parent.num != currentNode.num) {
+//                        previousLevel = currentLevel
+//                    }
+//                } else {
+//                    separatorCount += 1
+//                }
+
+                if (parent.num != currentNode.num) {
+                    treeList.add(mutableListOf(currentNode.stackFrameLocation.toString()))
+                    k += 1
+                } else {
+                    treeList[k].add(currentNode.stackFrameLocation.toString())
+                }
+            }
+
+            // Add children to the stack in reverse order with an incremented level
+            var p = 0
+            currentNode.children.values.reversed().forEach { child ->
+                if (p != currentNode.children.values.size-1) {
+                    separList.add(child.stackFrameLocation.toString())
+                }
+                stack.push(Pair(child, level + 1))
+                parentStack.push(currentNode) // Push the current node as the parent for its children
+                p += 1
+            }
+        }
+
+        val newTreeList: MutableList<MutableList<String>> = mutableListOf()
+        for (treeItem in treeList) {
+            if (separList.contains(treeItem[0])) {
+                newTreeList.add(mutableListOf("separ"))
+            }
+            newTreeList.add(treeItem)
+        }
+
+        println("treeList $newTreeList")
+        treeList = newTreeList
+
+        val treeForestList: MutableList<Component> = mutableListOf()
+//
+        for (i in 0 until newTreeList.size) {
+            val vertex = JBList<String>()
+            val data = mutableListOf<String>()
+            if (newTreeList[i][0] == "separ") {
+                treeForestList.add(Separator())
+            } else {
+                for (j in 0 until newTreeList[i].size) {
+                    data.add(newTreeList[i][j])
+                }
+                vertex.setListData(data.toTypedArray())
+                treeForestList.add(vertex)
+            }
+        }
+//
+        val forest = ContainerWithEdges()
+        treeForestList.forEach { forest.add(it) }
+        forest.layout = ForestLayout()
+        coroutineGraph.add(JBScrollPane(forest))
+        add(coroutineGraph)
+
+//        val dataToStackFrame = mutableMapOf<CoroutineInfoData, String>()
+//        if (rootValue == null) {
+//            return
+//        }
+//
+//        for (data in rootValue.additionalData) {
+//            if (data.stackTrace.size > positionOfStackFrame)
+//                dataToStackFrame[data] = data.stackTrace[data.stackTrace.size -1 - positionOfStackFrame].toString()
+//        }
+//
+//        val entries = dataToStackFrame.entries
+//
+//        val groupedByValue = entries.groupBy { it.value }
+//
+//        val groupedPositions = groupedByValue.map { (_, list) ->
+//            list.map { it.key }
+//        }
+//
+//        for (groupedPosition in groupedPositions) {
+//            if (entries.size == 1 && rootValue.stackTrace.isNotEmpty()) {
+//                rootValue.stackTrace.add(dataToStackFrame[groupedPosition[0]]!!)
+//                generateParallelStackTree(tree, rootValue, positionOfStackFrame + 1)
+//            } else if (entries.size > 1) {
+//                val childValue = CoroutineStacksNode(stackTrace = mutableListOf(dataToStackFrame[groupedPosition[0]]!!), additionalData = groupedPosition)
+//                println("childValue in recursion: $childValue")
+//                println()
+//                tree.insert(childValue, rootValue)
+//                generateParallelStackTree(tree, childValue, positionOfStackFrame + 1)
+//            }
+//        }
     }
+
+    data class Node(
+        val stackFrameLocation: Location?,
+        var num: Int,
+        val children: MutableMap<Location, Node>
+    )
 
     data class CoroutineStacksNode(
         val stackTrace: MutableList<String>,
@@ -315,4 +399,16 @@ private fun <T> CoroutineStacksPanel.TreeNode<T>.getHeight(): Int {
     }
 
     return maxHeight
+}
+
+fun createList(): JList<String> {
+    val list = JBList<String>()
+    val random = Random()
+    val data = mutableListOf<String>()
+    val size = random.nextInt(20) + 1
+    for (i in 0 until size) {
+        data.add("com.google.sandbox.foo()")
+    }
+    list.setListData(data.toTypedArray())
+    return list
 }
