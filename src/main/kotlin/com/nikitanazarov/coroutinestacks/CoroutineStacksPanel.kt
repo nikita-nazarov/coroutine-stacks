@@ -6,7 +6,6 @@ import com.intellij.debugger.engine.SuspendContextImpl
 import com.intellij.debugger.impl.DebuggerManagerListener
 import com.intellij.debugger.impl.DebuggerSession
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanelWithEmptyText
@@ -17,14 +16,16 @@ import com.nikitanazarov.coroutinestacks.ui.Separator
 import com.sun.jdi.Location
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
+import java.awt.Color
 import java.awt.Component
-import java.awt.Dimension
+import java.awt.Font
 import java.util.*
 import javax.swing.*
 
-
+// Currently, the code is not looking good, pushing code only to save progress
+// make necessary changes in the next commit
 class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
-    private val cellRenderer = object : DefaultListCellRenderer() {
+    class CustomCellRenderer(private val coroutinesActive: String?) : DefaultListCellRenderer() {
         private val ITEM_BORDER = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
 
         override fun getListCellRendererComponent(
@@ -35,14 +36,24 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             cellHasFocus: Boolean
         ): Component {
             val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+
+            if (index == 0) {
+                (renderer as? JComponent)?.apply {
+                    toolTipText = coroutinesActive
+                    font = renderer.font.deriveFont(Font.BOLD)
+                }
+            }
+
             if (index < list.model.size - 1) {
                 (renderer as? JComponent)?.border = ITEM_BORDER
             } else {
                 (renderer as? JComponent)?.border = null
             }
+
             return renderer
         }
     }
+
 
     private val coroutineGraph = Box.createVerticalBox()
 
@@ -101,7 +112,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 CoroutineStacksNode(stackTrace = mutableListOf(), additionalData = dispatcherToCoroutineDataList[dispatcher]!!)
             val tree = Tree(TreeNode(rootValue))
 
-            val root = Node(null, -1, mutableMapOf())
+            val root = Node(null, -1, mutableMapOf(), "")
             generateParallelStackTree( root, coroutineInfoDataList)
 
             printTree(tree.root, 0)
@@ -170,7 +181,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         val coroutineListView = JBList<String>(stackFrames)
 
-        coroutineListView.cellRenderer = cellRenderer
+//        coroutineListView.cellRenderer = cellRenderer
 
         val scrollPane = JBScrollPane(coroutineListView)
 
@@ -191,17 +202,25 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 val child = currentNode.children[stackFrame.location]
                 if (child != null) {
                     child.num += 1
+                    println("lolp: ${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state} \n")
+                    child.coroutinesActive += "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state} \n"
                     currentNode = child
                 } else {
-                    val node = Node( stackFrame.location,1, mutableMapOf())
+                    println("lolp: ${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state} \n")
+                    val node = Node(stackFrame.location,1, mutableMapOf(),
+                        "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state} \n"
+                    )
                     currentNode.children[stackFrame.location] = node
                     currentNode = node
                 }
             }
         }
+
         var treeList: MutableList<MutableList<String>> = mutableListOf()
         val stack = Stack<Pair<Node, Int>>()
         val parentStack = Stack<Node>() // Stack to track parent nodes
+        val treeListHeaders: MutableList<String> = mutableListOf()
+        val treeListHeaderHoverText: MutableList<String?> = mutableListOf()
 
         var previousLevel = 1
         var currentLevel = 1
@@ -209,6 +228,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         stack.push(Pair(rootValue, 0))
         val separList = mutableListOf<String>()
+        var noOfSeparInEnd = 0
         var k = -1
 
         println("root $rootValue")
@@ -217,6 +237,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             val parent = if (parentStack.isNotEmpty()) parentStack.pop() else null
             val indentation = "  ".repeat(level) // Indentation based on the level
             println("$indentation StackFrame: ${currentNode.stackFrameLocation}, Num: ${currentNode.num}")
+            noOfSeparInEnd = level
 
             if (parent != null) {
 //                currentLevel = level
@@ -235,6 +256,9 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 //                }
 
                 if (parent.num != currentNode.num) {
+                    treeListHeaders.add("${currentNode.num} Coroutines ACTIVE")
+                    println("currentNode coroutinesActive: ${currentNode.coroutinesActive}")
+                    treeListHeaderHoverText.add(currentNode.coroutinesActive)
                     treeList.add(mutableListOf(currentNode.stackFrameLocation.toString()))
                     k += 1
                 } else {
@@ -261,23 +285,32 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             }
             newTreeList.add(treeItem)
         }
+        for (a in 1..treeList.size - separList.size) {
+            newTreeList.add(mutableListOf("separ"))
+        }
 
         println("treeList $newTreeList")
         treeList = newTreeList
 
         val treeForestList: MutableList<Component> = mutableListOf()
 //
+        var treeListHeaderCount = 0
         for (i in 0 until newTreeList.size) {
             val vertex = JBList<String>()
             val data = mutableListOf<String>()
             if (newTreeList[i][0] == "separ") {
                 treeForestList.add(Separator())
             } else {
+                data.add(treeListHeaders[treeListHeaderCount])
                 for (j in 0 until newTreeList[i].size) {
                     data.add(newTreeList[i][j])
                 }
                 vertex.setListData(data.toTypedArray())
+                vertex.border = BorderFactory.createLineBorder(Color.BLACK)
+                println("hover data: ${treeListHeaderHoverText[treeListHeaderCount]}")
+                vertex.cellRenderer = CustomCellRenderer(treeListHeaderHoverText[treeListHeaderCount])
                 treeForestList.add(vertex)
+                treeListHeaderCount += 1
             }
         }
 //
@@ -322,7 +355,8 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     data class Node(
         val stackFrameLocation: Location?,
         var num: Int,
-        val children: MutableMap<Location, Node>
+        val children: MutableMap<Location, Node>,
+        var coroutinesActive: String
     )
 
     data class CoroutineStacksNode(
