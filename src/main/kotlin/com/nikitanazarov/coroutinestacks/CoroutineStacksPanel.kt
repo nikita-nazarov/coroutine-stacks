@@ -27,8 +27,6 @@ import java.awt.event.MouseEvent
 import java.util.*
 import javax.swing.*
 
-// Currently, the code is not looking good, pushing code only to save progress
-// make necessary changes in the next commit
 class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     private val coroutineGraph = Box.createVerticalBox()
     private val forest = Box.createVerticalBox()
@@ -53,7 +51,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             cellHasFocus: Boolean
         ): Component {
             val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-
             if (index == 0) {
                 (renderer as? JComponent)?.apply {
                     toolTipText = coroutinesActive
@@ -135,48 +132,47 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val dispatcherDropdownMenu = ComboBox(dispatchers)
 
         dispatcherDropdownMenu.addActionListener {
-            println("yump: ${it.actionCommand}")
             val selectedDispatcher = dispatcherDropdownMenu.selectedItem as String
-            updateParallelStackTree(selectedDispatcher, dispatcherToCoroutineDataList, positionManager)
+            updateCoroutineStackForest(selectedDispatcher, dispatcherToCoroutineDataList, positionManager)
         }
 
         val comboBoxSize = Dimension(Constants.comboBoxHeight, Constants.comboBoxWidth)
-        dispatcherDropdownMenu.preferredSize = comboBoxSize
-        dispatcherDropdownMenu.maximumSize = comboBoxSize
-        dispatcherDropdownMenu.minimumSize = comboBoxSize
+        dispatcherDropdownMenu.apply {
+            preferredSize = comboBoxSize
+            maximumSize = comboBoxSize
+            minimumSize = comboBoxSize
+        }
         coroutineStacksWindowHeader.add(dispatcherLabel)
         coroutineStacksWindowHeader.add(dispatcherDropdownMenu)
 
         val selectedDispatcher = dispatcherDropdownMenu.selectedItem as String
-        updateParallelStackTree(selectedDispatcher, dispatcherToCoroutineDataList, positionManager)
+        updateCoroutineStackForest(selectedDispatcher, dispatcherToCoroutineDataList, positionManager)
         coroutineGraph.add(coroutineStacksWindowHeader)
         coroutineGraph.add(forest)
         add(coroutineGraph)
     }
 
-    private fun updateParallelStackTree(
+    private fun updateCoroutineStackForest(
         selectedDispatcher: String,
         dispatcherToCoroutineDataList: MutableMap<String, MutableList<CoroutineInfoData>>,
         positionManager: CompoundPositionManager
     ) {
-        println("a1")
         forest.removeAll()
         val root = Node(null, -1, mutableMapOf(), "")
-        val coroutineStackForest = generateParallelStackTree(
+        val coroutineStackForest = buildCoroutineStackForest(
             root,
             dispatcherToCoroutineDataList[selectedDispatcher]!!,
             positionManager
         )
         forest.add(coroutineStackForest)
-        println("b1")
     }
 
-    private fun generateParallelStackTree(
+    private fun buildCoroutineStackForest(
         rootValue: Node,
         coroutineDataList: MutableList<CoroutineInfoData>,
         positionManager: CompoundPositionManager
     ): JBScrollPane {
-        var activeVertex = ""
+        var lastRunningStackFrame = ""
         coroutineDataList.forEach { coroutineData ->
             var currentNode = rootValue
             coroutineData.stackTrace.reversed().forEach { stackFrame ->
@@ -185,7 +181,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
                 if (child != null) {
                     if (coroutineData.descriptor.state == State.RUNNING) {
-                        activeVertex = child.stackFrameLocation.toString()
+                        lastRunningStackFrame = child.stackFrameLocation.toString()
                     }
 
                     child.num++
@@ -193,7 +189,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     currentNode = child
                 } else {
                     if (coroutineData.descriptor.state == State.RUNNING) {
-                        activeVertex = location.toString()
+                        lastRunningStackFrame = location.toString()
                     }
 
                     val node = Node(
@@ -233,7 +229,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 }
             }
 
-            // Add children to the stack in reverse order with an incremented level
             currentNode.children.values.reversed().forEachIndexed { index, child ->
                 if (index != currentNode.children.values.size - 1) {
                     locationsFollowedBySeparators.add(child.stackFrameLocation)
@@ -251,12 +246,13 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             }
             locationMatrixWithSeparators.add(locationData)
         }
+
         val separatorCount = locationMatrix.size - locationsFollowedBySeparators.size
         repeat(separatorCount) {
             locationMatrixWithSeparators.add(separator)
         }
-        val componentData: MutableList<Component> = mutableListOf()
 
+        val componentData: MutableList<Component> = mutableListOf()
         var headerIndex = 0
         locationMatrixWithSeparators.forEachIndexed { i, separatorOrLocation ->
             if (separatorOrLocation == separator) {
@@ -267,7 +263,8 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 data.add(headerContent[headerIndex])
                 data.addAll(locationMatrixWithSeparators[i].map { it.toString() })
                 vertex.setListData(data.toTypedArray())
-                vertex.border = if (activeVertex == data[locationMatrixWithSeparators[i].size]) {
+                val lastStackFrame = data[locationMatrixWithSeparators[i].size]
+                vertex.border = if (lastRunningStackFrame == lastStackFrame) {
                     BorderFactory.createLineBorder(Color(5, 201, 255))
                 } else {
                     BorderFactory.createLineBorder(Color.BLACK)
@@ -277,7 +274,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     override fun mouseClicked(e: MouseEvent?) {
                         val list = e?.source as JBList<*>
                         val index = list.locationToIndex(e.point)
-                        println("index: $index")
                         val location = if (index > 0) locationMatrixWithSeparators[i][index - 1] else null
                         if (location != null) {
                             performPositionTask(positionManager, location)
@@ -288,6 +284,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 headerIndex += 1
             }
         }
+
         val forest = ContainerWithEdges()
         componentData.forEach { forest.add(it) }
         forest.layout = ForestLayout()
