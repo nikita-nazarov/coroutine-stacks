@@ -127,21 +127,32 @@ internal fun Container.dfs(visitor: ComponentVisitor) {
     while (stack.isNotEmpty()) {
         var currentIndex = stack.pop()
         var currentParent = parents.peek()
+
+        fun leaveComponent() {
+            visitor.leaveComponent(currentParent, currentIndex)
+            currentIndex = currentParent
+            if (currentParent != -1) {
+                parents.pop()
+                currentParent = parents.peek()
+            }
+        }
+
         visitor.visitComponent(currentParent, currentIndex)
         var i = currentIndex + 1
         while (i < componentCount) {
             if (getComponent(i) is Separator) {
-                visitor.leaveComponent(currentParent, currentIndex)
-                currentIndex = currentParent
-                if (currentParent != -1) {
-                    parents.pop()
-                    currentParent = parents.peek()
-                }
+                leaveComponent()
                 i += 1
             } else {
                 stack.push(i)
                 parents.push(currentIndex)
                 break
+            }
+        }
+
+        if (stack.isEmpty() && currentIndex != -1) {
+            while (currentIndex != -1) {
+                leaveComponent()
             }
         }
     }
