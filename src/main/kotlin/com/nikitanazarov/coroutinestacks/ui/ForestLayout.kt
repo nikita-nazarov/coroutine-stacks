@@ -111,6 +111,7 @@ class ForestLayout(private val xPadding: Int = 50, private val yPadding: Int = 5
 
 class Separator : Component()
 
+// A visitor to provide dfs component processing
 internal interface ComponentVisitor {
     fun visitComponent(parentIndex: Int, index: Int) {
     }
@@ -120,6 +121,10 @@ internal interface ComponentVisitor {
 }
 
 internal fun Container.dfs(visitor: ComponentVisitor) {
+    if (componentCount == 0) {
+        return
+    }
+
     val stack = Stack<Int>()
     val parents = Stack<Int>()
     stack.add(0)
