@@ -18,7 +18,6 @@ import com.sun.jdi.Location
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.State
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
-import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
@@ -27,16 +26,15 @@ import java.awt.event.MouseEvent
 import java.util.*
 import javax.swing.*
 
-
 class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     private val panelContent = Box.createVerticalBox()
     private val forest = Box.createVerticalBox()
 
-    // num represents the number of times stackframe represented by respective Node occurs in the collection of all stack frames
-    // of all stack traces
+    data class CoroutineTrace(val locations: MutableList<Location?>, val header: String, val hoverContent: String)
+
     data class Node(
         val stackFrameLocation: Location?,
-        var num: Int,
+        var num: Int, // Represents how many coroutines have this frame in their stack trace
         val children: MutableMap<Location, Node>,
         var coroutinesActive: String
     )
@@ -54,18 +52,21 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             cellHasFocus: Boolean
         ): Component {
             val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            if (index == 0) {
-                (renderer as? JComponent)?.apply {
-                    toolTipText = coroutinesActive
-                    font = renderer.font.deriveFont(Font.BOLD)
-                }
-            } else if (index < list.model.size) {
-                (renderer as? JComponent)?.apply {
-                    toolTipText = value.toString()
-                }
+            if (renderer !is JComponent) {
+                return renderer
             }
 
-            (renderer as? JComponent)?.border = if (index < list.model.size - 1) itemBorder else null
+            with(renderer) {
+                val listSize = list.model.size
+                if (index == 0) {
+                    toolTipText = coroutinesActive
+                    font = renderer.font.deriveFont(Font.BOLD)
+                } else if (index < listSize) {
+                    toolTipText = value.toString()
+                }
+                border = if (index < listSize - 1) itemBorder else null
+            }
+
             return renderer
         }
     }
@@ -75,15 +76,15 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         emptyText.text = CoroutineStacksBundle.message("no.java.debug.process.is.running")
         val currentSession = XDebuggerManager.getInstance(project).currentSession
         if (currentSession != null) {
-            val myProcess = (currentSession.debugProcess as JavaDebugProcess).debuggerSession.process
+            val currentProcess = (currentSession.debugProcess as JavaDebugProcess).debuggerSession.process
             emptyText.component.isVisible = false
-            myProcess.managerThread.invoke(object : DebuggerCommandImpl() {
+            currentProcess.managerThread.invoke(object : DebuggerCommandImpl() {
                 override fun action() {
-                    buildCoroutineGraph(myProcess.suspendManager.pausedContext)
+                    buildCoroutineGraph(currentProcess.suspendManager.pausedContext)
                 }
             })
 
-            myProcess.addDebugProcessListener(debugProcessListener())
+            currentProcess.addDebugProcessListener(createPanelBuilderListener())
         }
 
         project.messageBus.connect()
@@ -93,7 +94,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 }
 
                 override fun sessionCreated(session: DebuggerSession) {
-                    session.process.addDebugProcessListener(debugProcessListener())
+                    session.process.addDebugProcessListener(createPanelBuilderListener())
                 }
 
                 override fun sessionRemoved(session: DebuggerSession) {
@@ -104,7 +105,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             })
     }
 
-    private fun debugProcessListener() = object : DebugProcessListener {
+    private fun createPanelBuilderListener() = object : DebugProcessListener {
         override fun paused(suspendContext: SuspendContext) {
             emptyText.component.isVisible = false
             buildCoroutineGraph(suspendContext)
@@ -162,81 +163,40 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     ) {
         forest.removeAll()
         val root = Node(null, -1, mutableMapOf(), "")
-        val coroutineStackForest = buildCoroutineStackForest(
+        val coroutineStackForest = suspendContextImpl.buildCoroutineStackForest(
             root,
-            dispatcherToCoroutineDataList[selectedDispatcher]!!,
-            suspendContextImpl
+            dispatcherToCoroutineDataList[selectedDispatcher]!!
         )
         forest.add(coroutineStackForest)
         updateUI()
     }
 
-    private fun buildCoroutineStackForest(
+    private fun SuspendContextImpl.buildCoroutineStackForest(
         rootValue: Node,
         coroutineDataList: MutableList<CoroutineInfoData>,
-        suspendContextImpl: SuspendContextImpl
     ): JBScrollPane {
-        var lastRunningStackFrame = ""
-        lastRunningStackFrame = buildStackFrameGraph(coroutineDataList, rootValue, lastRunningStackFrame)
+        val lastRunningStackFrame = buildStackFrameGraph(coroutineDataList, rootValue)
+        val coroutineTraces = createCoroutineTraces(rootValue)
+        return createCoroutineTraceForest(coroutineTraces, lastRunningStackFrame)
+    }
 
-        val locationMatrix: MutableList<MutableList<Location?>> = mutableListOf()
-        val stack = Stack<Pair<Node, Int>>()
-        val parentStack = Stack<Node>()
-        val headerContent: MutableList<String> = mutableListOf()
-        val hoverContentForHeaders: MutableList<String?> = mutableListOf()
-
-        stack.push(Pair(rootValue, 0))
-        val locationsFollowedBySeparators = mutableListOf<Location?>()
-
-        fillLocationMatrix(
-            stack,
-            parentStack,
-            headerContent,
-            hoverContentForHeaders,
-            locationMatrix,
-            locationsFollowedBySeparators
-        )
-
-        val separator : MutableList<Location?> = mutableListOf(null)
-        val locationMatrixWithSeparators: MutableList<MutableList<Location?>> = mutableListOf()
-        for (locationData in locationMatrix) {
-            if (locationsFollowedBySeparators.contains(locationData[0])) {
-                locationMatrixWithSeparators.add(separator)
-            }
-            locationMatrixWithSeparators.add(locationData)
-        }
-
-        val separatorCount = locationMatrix.size - locationsFollowedBySeparators.size
-        repeat(separatorCount) {
-            locationMatrixWithSeparators.add(separator)
-        }
-
+    private fun SuspendContextImpl.createCoroutineTraceForest(traces: List<CoroutineTrace?>, lastRunningStackFrame: String): JBScrollPane {
         val componentData: MutableList<Component> = mutableListOf()
-        var headerIndex = 0
-        var previousListSelection: JBList<String>? = null
-        locationMatrixWithSeparators.forEachIndexed { i, separatorOrLocation ->
-            if (separatorOrLocation === separator) {
+        var previousListSelection: JBList<*>? = null
+        traces.forEach { trace ->
+            if (trace == null) {
                 componentData.add(Separator())
-            } else {
-                val vertex = createCoroutineTrace(
-                    headerContent,
-                    headerIndex,
-                    locationMatrixWithSeparators,
-                    i,
-                    lastRunningStackFrame,
-                    hoverContentForHeaders,
-                    suspendContextImpl
-                )
-                vertex.addListSelectionListener { e ->
-                    val currentList = e.source as JBList<String>
-                    if (previousListSelection != null && previousListSelection != currentList) {
-                        previousListSelection?.clearSelection()
-                    }
-                    previousListSelection = currentList
-                }
-                componentData.add(vertex)
-                headerIndex += 1
+                return@forEach
             }
+            val vertex = createCoroutineTraceUI(trace, lastRunningStackFrame)
+            vertex.addListSelectionListener { e ->
+                val currentList = e.source as? JBList<*> ?: return@addListSelectionListener
+                if (previousListSelection != currentList) {
+                    previousListSelection?.clearSelection()
+                }
+                previousListSelection = currentList
+            }
+            componentData.add(vertex)
         }
 
         val forest = ContainerWithEdges()
@@ -245,27 +205,32 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         return JBScrollPane(forest)
     }
 
-    private fun fillLocationMatrix(
-        stack: Stack<Pair<Node, Int>>,
-        parentStack: Stack<Node>,
-        headerContent: MutableList<String>,
-        hoverContentForHeaders: MutableList<String?>,
-        locationMatrix: MutableList<MutableList<Location?>>,
-        locationsFollowedBySeparators: MutableList<Location?>
-    ) {
-        var locationMatrixPointer = -1
+    private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
+        val stack = Stack<Pair<Node, Int>>()
+        val parentStack = Stack<Node>()
+
+        stack.push(Pair(rootValue, 0))
+        val locationsFollowedBySeparators = mutableListOf<Location?>()
+
+        var currentTrace: CoroutineTrace? = null
+        val coroutineTraces = mutableListOf<CoroutineTrace?>()
         while (stack.isNotEmpty()) {
             val (currentNode, level) = stack.pop()
             val parent = if (parentStack.isNotEmpty()) parentStack.pop() else null
 
             if (parent != null) {
+                if (locationsFollowedBySeparators.contains(currentNode.stackFrameLocation)) {
+                    coroutineTraces.add(null)
+                }
                 if (parent.num != currentNode.num) {
-                    headerContent.add("${currentNode.num} Coroutines ACTIVE")
-                    hoverContentForHeaders.add(currentNode.coroutinesActive)
-                    locationMatrix.add(mutableListOf(currentNode.stackFrameLocation))
-                    locationMatrixPointer += 1
+                    currentTrace = CoroutineTrace(
+                        mutableListOf(currentNode.stackFrameLocation),
+                        CoroutineStacksBundle.message("number.of.coroutines.active", currentNode.num),
+                        currentNode.coroutinesActive
+                    )
+                    coroutineTraces.add(currentTrace)
                 } else {
-                    locationMatrix[locationMatrixPointer].add(currentNode.stackFrameLocation)
+                    currentTrace?.locations?.add(currentNode.stackFrameLocation)
                 }
             }
 
@@ -277,54 +242,50 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 parentStack.push(currentNode)
             }
         }
+
+        println("coroutineTrace")
+        for (trace in coroutineTraces) {
+            println(trace)
+        }
+        return coroutineTraces
     }
 
-    private fun createCoroutineTrace(
-        headerContent: MutableList<String>,
-        headerIndex: Int,
-        locationMatrixWithSeparators: MutableList<MutableList<Location?>>,
-        i: Int,
-        lastRunningStackFrame: String,
-        hoverContentForHeaders: MutableList<String?>,
-        suspendContextImpl: SuspendContextImpl
-    ): JBList<String> {
+    private fun SuspendContextImpl.createCoroutineTraceUI(trace: CoroutineTrace, lastRunningStackFrame: String): JBList<String> {
         val vertex = JBList<String>()
         val data = mutableListOf<String>()
-        data.add(headerContent[headerIndex])
-        data.addAll(locationMatrixWithSeparators[i].map { it.toString() })
+        data.add(trace.header)
+        data.addAll(trace.locations.map { it.toString() })
         vertex.setListData(data.toTypedArray())
-        val lastStackFrame = data[locationMatrixWithSeparators[i].size]
+        val lastStackFrame = data[trace.locations.size]
         vertex.border = if (lastRunningStackFrame == lastStackFrame) {
-            BorderFactory.createLineBorder(Color(5, 201, 255))
+            BorderFactory.createLineBorder(JBColor.BLUE)
         } else {
-            BorderFactory.createLineBorder(Color.BLACK)
+            BorderFactory.createLineBorder(JBColor.BLACK)
         }
-        vertex.cellRenderer = CustomCellRenderer(hoverContentForHeaders[headerIndex])
+        vertex.cellRenderer = CustomCellRenderer(trace.hoverContent)
         vertex.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent?) {
-                val list = e?.source as JBList<*>
-                val index = list.locationToIndex(e.point)
-                val location = if (index > 0) locationMatrixWithSeparators[i][index - 1] else null
-                if (location != null) {
-                    suspendContextImpl.debugProcess.managerThread.invoke(object : DebuggerCommandImpl() {
-                        override fun action() {
-                            val positionManager = suspendContextImpl.debugProcess.positionManager
-                            val sourcePosition = positionManager.getSourcePosition(location)
-                            sourcePosition?.navigate(true)
-                        }
-                    })
-                }
+                val list = e?.source as? JBList<*> ?: return
+                val index = list.locationToIndex(e.point).takeIf { it > 0 } ?: return
+                val location = trace.locations[index - 1]
+                debugProcess.managerThread.invoke(object : DebuggerCommandImpl() {
+                    override fun action() {
+                        val positionManager = debugProcess.positionManager
+                        val sourcePosition = positionManager.getSourcePosition(location)
+                        sourcePosition?.navigate(true)
+                    }
+                })
             }
         })
+
         return vertex
     }
 
     private fun buildStackFrameGraph(
         coroutineDataList: MutableList<CoroutineInfoData>,
-        rootValue: Node,
-        lastRunningStackFrame: String
+        rootValue: Node
     ): String {
-        var lastRunningStackFrame1 = lastRunningStackFrame
+        var lastRunningStackFrame = ""
         coroutineDataList.forEach { coroutineData ->
             var currentNode = rootValue
             coroutineData.stackTrace.reversed().forEach { stackFrame ->
@@ -333,7 +294,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
                 if (child != null) {
                     if (coroutineData.descriptor.state == State.RUNNING) {
-                        lastRunningStackFrame1 = child.stackFrameLocation.toString()
+                        lastRunningStackFrame = child.stackFrameLocation.toString()
                     }
 
                     child.num++
@@ -341,7 +302,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     currentNode = child
                 } else {
                     if (coroutineData.descriptor.state == State.RUNNING) {
-                        lastRunningStackFrame1 = location.toString()
+                        lastRunningStackFrame = location.toString()
                     }
 
                     val node = Node(
@@ -355,6 +316,6 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 }
             }
         }
-        return lastRunningStackFrame1
+        return lastRunningStackFrame
     }
 }

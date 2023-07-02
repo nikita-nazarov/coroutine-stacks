@@ -78,12 +78,12 @@ class ForestLayout(private val xPadding: Int = 50, private val yPadding: Int = 5
             }
         })
 
-        var mostRigtX = 0
+        var mostRightX = 0
         parent.dfs(object : ComponentVisitor {
             override fun leaveComponent(parentIndex: Int, index: Int) {
                 if (numChildren[index] == 0) {
-                    xs[index] = mostRigtX + xPadding
-                    mostRigtX += xPadding + parent.getComponentSize(index).width
+                    xs[index] = mostRightX + xPadding
+                    mostRightX += xPadding + parent.getComponentSize(index).width
                 } else {
                     xs[index] /= numChildren[index]
                 }
@@ -111,6 +111,7 @@ class ForestLayout(private val xPadding: Int = 50, private val yPadding: Int = 5
 
 class Separator : Component()
 
+// A visitor to provide dfs component processing
 internal interface ComponentVisitor {
     fun visitComponent(parentIndex: Int, index: Int) {
     }
@@ -120,6 +121,10 @@ internal interface ComponentVisitor {
 }
 
 internal fun Container.dfs(visitor: ComponentVisitor) {
+    if (componentCount == 0) {
+        return
+    }
+
     val stack = Stack<Int>()
     val parents = Stack<Int>()
     stack.add(0)
@@ -127,21 +132,32 @@ internal fun Container.dfs(visitor: ComponentVisitor) {
     while (stack.isNotEmpty()) {
         var currentIndex = stack.pop()
         var currentParent = parents.peek()
+
+        fun leaveComponent() {
+            visitor.leaveComponent(currentParent, currentIndex)
+            currentIndex = currentParent
+            if (currentParent != -1) {
+                parents.pop()
+                currentParent = parents.peek()
+            }
+        }
+
         visitor.visitComponent(currentParent, currentIndex)
         var i = currentIndex + 1
         while (i < componentCount) {
             if (getComponent(i) is Separator) {
-                visitor.leaveComponent(currentParent, currentIndex)
-                currentIndex = currentParent
-                if (currentParent != -1) {
-                    parents.pop()
-                    currentParent = parents.peek()
-                }
+                leaveComponent()
                 i += 1
             } else {
                 stack.push(i)
                 parents.push(currentIndex)
                 break
+            }
+        }
+
+        if (stack.isEmpty() && currentIndex != -1) {
+            while (currentIndex != -1) {
+                leaveComponent()
             }
         }
     }
