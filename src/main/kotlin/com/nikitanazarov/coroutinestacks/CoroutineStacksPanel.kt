@@ -10,6 +10,7 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanelWithEmptyText
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.util.preferredWidth
 import com.intellij.xdebugger.XDebuggerManager
 import com.nikitanazarov.coroutinestacks.ui.ContainerWithEdges
 import com.nikitanazarov.coroutinestacks.ui.ForestLayout
@@ -40,7 +41,8 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     )
 
     class CustomCellRenderer(
-        private val coroutinesActive: String?
+        private val coroutinesActive: String?,
+        private val averagePreferredWidth: Int
     ) : DefaultListCellRenderer() {
         private val itemBorder = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
 
@@ -61,8 +63,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 if (index == 0) {
                     toolTipText = coroutinesActive
                     font = renderer.font.deriveFont(Font.BOLD)
+                    preferredWidth = averagePreferredWidth
                 } else if (index < listSize) {
                     toolTipText = value.toString()
+                    preferredWidth = averagePreferredWidth
                 }
                 border = if (index < listSize - 1) itemBorder else null
             }
@@ -105,6 +109,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             })
     }
 
+
     private fun createPanelBuilderListener() = object : DebugProcessListener {
         override fun paused(suspendContext: SuspendContext) {
             emptyText.component.isVisible = false
@@ -137,7 +142,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         dispatcherDropdownMenu.addActionListener {
             val selectedDispatcher = dispatcherDropdownMenu.selectedItem as String
-            updateCoroutineStackForest(selectedDispatcher, dispatcherToCoroutineDataList, suspendContextImpl)
+            val coroutineDataList = dispatcherToCoroutineDataList[selectedDispatcher]
+            if (coroutineDataList != null) {
+                updateCoroutineStackForest(coroutineDataList, suspendContextImpl)
+            }
         }
 
         val comboBoxSize = Dimension(Constants.comboBoxHeight, Constants.comboBoxWidth)
@@ -149,23 +157,33 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         coroutineStacksWindowHeader.add(dispatcherLabel)
         coroutineStacksWindowHeader.add(dispatcherDropdownMenu)
 
+        dispatcherToCoroutineDataList.forEach { (dispatcher, coroutineDataList) ->
+            coroutineDataList.forEach { data ->
+                if (data.descriptor.state == State.RUNNING) {
+                    dispatcherDropdownMenu.selectedItem = dispatcher
+                }
+            }
+        }
+
         val selectedDispatcher = dispatcherDropdownMenu.selectedItem as String
-        updateCoroutineStackForest(selectedDispatcher, dispatcherToCoroutineDataList, suspendContextImpl)
+        val coroutineDataList = dispatcherToCoroutineDataList[selectedDispatcher]
+        if (coroutineDataList != null) {
+            updateCoroutineStackForest(coroutineDataList, suspendContextImpl)
+        }
         panelContent.add(coroutineStacksWindowHeader)
         panelContent.add(forest)
         add(panelContent)
     }
 
     private fun updateCoroutineStackForest(
-        selectedDispatcher: String,
-        dispatcherToCoroutineDataList: MutableMap<String, MutableList<CoroutineInfoData>>,
+        coroutineDataList: MutableList<CoroutineInfoData>,
         suspendContextImpl: SuspendContextImpl
     ) {
         forest.removeAll()
         val root = Node(null, -1, mutableMapOf(), "")
         val coroutineStackForest = suspendContextImpl.buildCoroutineStackForest(
             root,
-            dispatcherToCoroutineDataList[selectedDispatcher]!!
+            coroutineDataList
         )
         forest.add(coroutineStackForest)
         updateUI()
@@ -183,12 +201,13 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     private fun SuspendContextImpl.createCoroutineTraceForest(traces: List<CoroutineTrace?>, lastRunningStackFrame: String): JBScrollPane {
         val componentData: MutableList<Component> = mutableListOf()
         var previousListSelection: JBList<*>? = null
+        val averagePreferredWidth = calculateAveragePreferredWidth(traces)
         traces.forEach { trace ->
             if (trace == null) {
                 componentData.add(Separator())
                 return@forEach
             }
-            val vertex = createCoroutineTraceUI(trace, lastRunningStackFrame)
+            val vertex = createCoroutineTraceUI(trace, lastRunningStackFrame, averagePreferredWidth)
             vertex.addListSelectionListener { e ->
                 val currentList = e.source as? JBList<*> ?: return@addListSelectionListener
                 if (previousListSelection != currentList) {
@@ -203,6 +222,15 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         componentData.forEach { forest.add(it) }
         forest.layout = ForestLayout()
         return JBScrollPane(forest)
+    }
+
+    private fun calculateAveragePreferredWidth(traces: List<CoroutineTrace?>): Int {
+        val validTraces = traces.filterNotNull()
+        val maxWidth = validTraces.sumOf { trace ->
+            val vertex = createVertexAndData(trace).first
+            vertex.preferredWidth
+        }
+        return maxWidth / validTraces.size
     }
 
     private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
@@ -243,26 +271,22 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             }
         }
 
-        println("coroutineTrace")
-        for (trace in coroutineTraces) {
-            println(trace)
-        }
         return coroutineTraces
     }
 
-    private fun SuspendContextImpl.createCoroutineTraceUI(trace: CoroutineTrace, lastRunningStackFrame: String): JBList<String> {
-        val vertex = JBList<String>()
-        val data = mutableListOf<String>()
-        data.add(trace.header)
-        data.addAll(trace.locations.map { it.toString() })
-        vertex.setListData(data.toTypedArray())
+    private fun SuspendContextImpl.createCoroutineTraceUI(
+        trace: CoroutineTrace,
+        lastRunningStackFrame: String,
+        averagePreferredWidth: Int
+    ): JBList<String> {
+        val (vertex, data) = createVertexAndData(trace)
         val lastStackFrame = data[trace.locations.size]
         vertex.border = if (lastRunningStackFrame == lastStackFrame) {
             BorderFactory.createLineBorder(JBColor.BLUE)
         } else {
             BorderFactory.createLineBorder(JBColor.BLACK)
         }
-        vertex.cellRenderer = CustomCellRenderer(trace.hoverContent)
+        vertex.cellRenderer = CustomCellRenderer(trace.hoverContent, averagePreferredWidth)
         vertex.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent?) {
                 val list = e?.source as? JBList<*> ?: return
@@ -279,6 +303,15 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         })
 
         return vertex
+    }
+
+    private fun createVertexAndData(trace: CoroutineTrace): Pair<JBList<String>, MutableList<String>> {
+        val vertex = JBList<String>()
+        val data = mutableListOf<String>()
+        data.add(trace.header)
+        data.addAll(trace.locations.map { it.toString() })
+        vertex.setListData(data.toTypedArray())
+        return Pair(vertex, data)
     }
 
     private fun buildStackFrameGraph(
