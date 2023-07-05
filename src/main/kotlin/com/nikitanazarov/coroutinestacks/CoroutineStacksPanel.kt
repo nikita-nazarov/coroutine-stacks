@@ -66,18 +66,23 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 val listSize = list.model.size
                 if (index == 0) {
                     toolTipText = coroutinesActive
-                    font = renderer.font.deriveFont(Font.BOLD)
+                    font = font.deriveFont(Font.BOLD)
                     preferredWidth = averagePreferredWidth
                 } else if (index < listSize) {
                     toolTipText = value.toString()
                     preferredWidth = averagePreferredWidth
                 }
-                border = if (index < listSize - 1) compoundBorder else if (index == listSize - 1) leftPaddingBorder else null
+                border = when {
+                    index < listSize - 1 -> compoundBorder
+                    index == listSize - 1 -> leftPaddingBorder
+                    else -> null
+                }
             }
 
             return renderer
         }
     }
+
 
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -113,17 +118,14 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             })
     }
 
-    private fun roundedBorder(color: JBColor): Border {
+    private fun createRoundedBorder(color: JBColor): Border {
         val cornerRadius = 10
         val borderThickness = 1
+
         val roundedBorder = object : LineBorder(color, borderThickness) {
             override fun getBorderInsets(c: Component?): Insets {
-                return Insets(
-                    super.getBorderInsets(c).top,
-                    super.getBorderInsets(c).left,
-                    super.getBorderInsets(c).bottom,
-                    super.getBorderInsets(c).right
-                )
+                val insets = super.getBorderInsets(c)
+                return Insets(insets.top, insets.left, insets.bottom, insets.right)
             }
 
             override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
@@ -136,8 +138,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 }
             }
         }
+
         return roundedBorder
     }
+
 
     private fun createPanelBuilderListener() = object : DebugProcessListener {
         override fun paused(suspendContext: SuspendContext) {
@@ -231,11 +235,13 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val componentData: MutableList<Component> = mutableListOf()
         var previousListSelection: JBList<*>? = null
         val averagePreferredWidth = calculateAveragePreferredWidth(traces)
+
         traces.forEach { trace ->
             if (trace == null) {
                 componentData.add(Separator())
                 return@forEach
             }
+
             val vertex = createCoroutineTraceUI(trace, lastRunningStackFrame, averagePreferredWidth)
             vertex.addListSelectionListener { e ->
                 val currentList = e.source as? JBList<*> ?: return@addListSelectionListener
@@ -250,6 +256,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val forest = ContainerWithEdges()
         componentData.forEach { forest.add(it) }
         forest.layout = ForestLayout()
+
         return JBScrollPane(forest)
     }
 
@@ -310,12 +317,14 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     ): JBList<String> {
         val (vertex, data) = createVertexAndData(trace)
         val lastStackFrame = data[trace.locations.size]
-        vertex.border = if (lastRunningStackFrame == lastStackFrame) {
-            roundedBorder(JBColor.BLUE)
-        } else {
-            roundedBorder(JBColor.BLACK)
 
+        val border = if (lastRunningStackFrame == lastStackFrame) {
+            createRoundedBorder(JBColor.BLUE)
+        } else {
+            createRoundedBorder(JBColor.BLACK)
         }
+        vertex.border = border
+
         vertex.cellRenderer = CustomCellRenderer(trace.hoverContent, averagePreferredWidth)
         vertex.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent?) {
@@ -345,7 +354,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     }
 
     private fun buildStackFrameGraph(
-        coroutineDataList: MutableList<CoroutineInfoData>,
+        coroutineDataList: List<CoroutineInfoData>,
         rootValue: Node
     ): String {
         var lastRunningStackFrame = ""
@@ -361,7 +370,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     }
 
                     child.num++
-                    child.coroutinesActive += "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state} \n"
+                    child.coroutinesActive += "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state}\n"
                     currentNode = child
                 } else {
                     if (coroutineData.descriptor.state == State.RUNNING) {
@@ -372,7 +381,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                         location,
                         1,
                         mutableMapOf(),
-                        "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state} \n"
+                        "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state}\n"
                     )
                     currentNode.children[location] = node
                     currentNode = node
