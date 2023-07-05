@@ -19,13 +19,14 @@ import com.sun.jdi.Location
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.State
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
-import java.awt.Component
-import java.awt.Dimension
-import java.awt.Font
+import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.*
 import javax.swing.*
+import javax.swing.border.Border
+import javax.swing.border.EmptyBorder
+import javax.swing.border.LineBorder
 
 class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     private val panelContent = Box.createVerticalBox()
@@ -42,9 +43,12 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
     class CustomCellRenderer(
         private val coroutinesActive: String?,
-        private val averagePreferredWidth: Int
+        private val averagePreferredWidth: Int,
+        padding: Int = 3
     ) : DefaultListCellRenderer() {
         private val itemBorder = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
+        private val leftPaddingBorder: Border = EmptyBorder(0, padding, 0, 0)
+        private val compoundBorder = BorderFactory.createCompoundBorder(itemBorder, leftPaddingBorder)
 
         override fun getListCellRendererComponent(
             list: JList<*>,
@@ -68,7 +72,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     toolTipText = value.toString()
                     preferredWidth = averagePreferredWidth
                 }
-                border = if (index < listSize - 1) itemBorder else null
+                border = if (index < listSize - 1) compoundBorder else if (index == listSize - 1) leftPaddingBorder else null
             }
 
             return renderer
@@ -109,6 +113,31 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             })
     }
 
+    private fun roundedBorder(color: JBColor): Border {
+        val cornerRadius = 10
+        val borderThickness = 1
+        val roundedBorder = object : LineBorder(color, borderThickness) {
+            override fun getBorderInsets(c: Component?): Insets {
+                return Insets(
+                    super.getBorderInsets(c).top,
+                    super.getBorderInsets(c).left,
+                    super.getBorderInsets(c).bottom,
+                    super.getBorderInsets(c).right
+                )
+            }
+
+            override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
+                val g2d = g as? Graphics2D
+                g2d?.let {
+                    val arc = 2 * cornerRadius
+                    it.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    it.color = color
+                    it.drawRoundRect(x, y, width - 1, height - 1, arc, arc)
+                }
+            }
+        }
+        return roundedBorder
+    }
 
     private fun createPanelBuilderListener() = object : DebugProcessListener {
         override fun paused(suspendContext: SuspendContext) {
@@ -282,9 +311,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val (vertex, data) = createVertexAndData(trace)
         val lastStackFrame = data[trace.locations.size]
         vertex.border = if (lastRunningStackFrame == lastStackFrame) {
-            BorderFactory.createLineBorder(JBColor.BLUE)
+            roundedBorder(JBColor.BLUE)
         } else {
-            BorderFactory.createLineBorder(JBColor.BLACK)
+            roundedBorder(JBColor.BLACK)
+
         }
         vertex.cellRenderer = CustomCellRenderer(trace.hoverContent, averagePreferredWidth)
         vertex.addMouseListener(object : MouseAdapter() {
