@@ -20,7 +20,8 @@ class ForestLayout(private val xPadding: Int = 50, private val yPadding: Int = 5
         parent.dfs(object : ComponentVisitor {
             override fun visitComponent(parentIndex: Int, index: Int) {
                 val compSize = parent.getComponentSize(index)
-                if (index + 1 < parent.componentCount && parent.getComponent(index + 1) is Separator) {
+                val nextComponent = if (index + 1 < parent.componentCount) parent.getComponent(index + 1) else null
+                if (nextComponent == null || nextComponent is Separator) {
                     width += compSize.width + xPadding
                 }
 
