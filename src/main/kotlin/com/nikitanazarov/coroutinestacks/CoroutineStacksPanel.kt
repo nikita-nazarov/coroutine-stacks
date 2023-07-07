@@ -35,10 +35,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     data class CoroutineTrace(val locations: MutableList<Location?>, val header: String, val hoverContent: String)
 
     data class Node(
-        val stackFrameLocation: Location?,
-        var num: Int, // Represents how many coroutines have this frame in their stack trace
-        val children: MutableMap<Location, Node>,
-        var coroutinesActive: String
+        val stackFrameLocation: Location? = null,
+        var num: Int = 0, // Represents how many coroutines have this frame in their stack trace
+        val children: MutableMap<Location, Node> = mutableMapOf(),
+        var coroutinesActive: String = ""
     )
 
     class CustomCellRenderer(
@@ -176,7 +176,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         dispatcherDropdownMenu.addActionListener {
             val selectedDispatcher = dispatcherDropdownMenu.selectedItem as String
             val coroutineDataList = dispatcherToCoroutineDataList[selectedDispatcher]
-            if (coroutineDataList != null) {
+            if (!coroutineDataList.isNullOrEmpty()) {
                 updateCoroutineStackForest(coroutineDataList, suspendContextImpl)
             }
         }
@@ -200,7 +200,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
         val selectedDispatcher = dispatcherDropdownMenu.selectedItem as String
         val coroutineDataList = dispatcherToCoroutineDataList[selectedDispatcher]
-        if (coroutineDataList != null) {
+        if (!coroutineDataList.isNullOrEmpty()) {
             updateCoroutineStackForest(coroutineDataList, suspendContextImpl)
         }
         panelContent.add(coroutineStacksWindowHeader)
@@ -213,7 +213,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         suspendContextImpl: SuspendContextImpl
     ) {
         forest.removeAll()
-        val root = Node(null, -1, mutableMapOf(), "")
+        val root = Node()
         val coroutineStackForest = suspendContextImpl.buildCoroutineStackForest(
             root,
             coroutineDataList
@@ -270,39 +270,32 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     }
 
     private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
-        val stack = Stack<Pair<Node, Int>>()
+        val stack = Stack<Pair<Node, Int>>().apply { push(rootValue to 0) }
         val parentStack = Stack<Node>()
-
-        stack.push(Pair(rootValue, 0))
-        val locationsFollowedBySeparators = mutableListOf<Location?>()
-
-        var currentTrace: CoroutineTrace? = null
+        var previousLevel: Int? = null
         val coroutineTraces = mutableListOf<CoroutineTrace?>()
+
         while (stack.isNotEmpty()) {
-            val (currentNode, level) = stack.pop()
+            val (currentNode, currentLevel) = stack.pop()
             val parent = if (parentStack.isNotEmpty()) parentStack.pop() else null
 
-            if (parent != null) {
-                if (locationsFollowedBySeparators.contains(currentNode.stackFrameLocation)) {
+            if (parent != null && parent.num != currentNode.num) {
+                val currentTrace = CoroutineTrace(
+                    mutableListOf(currentNode.stackFrameLocation),
+                    CoroutineStacksBundle.message("number.of.coroutines.active", currentNode.num),
+                    currentNode.coroutinesActive
+                )
+                repeat((previousLevel ?: 0) - currentLevel + 1) {
                     coroutineTraces.add(null)
                 }
-                if (parent.num != currentNode.num) {
-                    currentTrace = CoroutineTrace(
-                        mutableListOf(currentNode.stackFrameLocation),
-                        CoroutineStacksBundle.message("number.of.coroutines.active", currentNode.num),
-                        currentNode.coroutinesActive
-                    )
-                    coroutineTraces.add(currentTrace)
-                } else {
-                    currentTrace?.locations?.add(currentNode.stackFrameLocation)
-                }
+                coroutineTraces.add(currentTrace)
+                previousLevel = currentLevel
+            } else if (parent != null) {
+                coroutineTraces.lastOrNull()?.locations?.add(0, currentNode.stackFrameLocation)
             }
 
-            currentNode.children.values.reversed().forEachIndexed { index, child ->
-                if (index != currentNode.children.values.size - 1) {
-                    locationsFollowedBySeparators.add(child.stackFrameLocation)
-                }
-                stack.push(child to (level + 1))
+            currentNode.children.values.reversed().forEach { child ->
+                stack.push(child to (currentLevel + 1))
                 parentStack.push(currentNode)
             }
         }
@@ -316,7 +309,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         averagePreferredWidth: Int
     ): JBList<String> {
         val (vertex, data) = createVertexAndData(trace)
-        val lastStackFrame = data[trace.locations.size]
+        val lastStackFrame = data[1]
 
         val border = if (lastRunningStackFrame == lastStackFrame) {
             createRoundedBorder(JBColor.BLUE)
