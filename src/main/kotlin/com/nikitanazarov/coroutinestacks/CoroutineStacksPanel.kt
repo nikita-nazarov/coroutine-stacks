@@ -4,6 +4,7 @@ import com.intellij.debugger.engine.*
 import com.intellij.debugger.engine.events.DebuggerCommandImpl
 import com.intellij.debugger.impl.DebuggerManagerListener
 import com.intellij.debugger.impl.DebuggerSession
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.JBColor
@@ -12,11 +13,15 @@ import com.intellij.ui.components.JBPanelWithEmptyText
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.util.preferredWidth
 import com.intellij.xdebugger.XDebuggerManager
+import com.intellij.xdebugger.frame.XExecutionStack
+import com.intellij.xdebugger.frame.XStackFrame
 import com.nikitanazarov.coroutinestacks.ui.ContainerWithEdges
 import com.nikitanazarov.coroutinestacks.ui.ForestLayout
 import com.nikitanazarov.coroutinestacks.ui.Separator
 import com.sun.jdi.Location
+import org.jetbrains.kotlin.analysis.decompiler.stub.file.ClsClassFinder
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
+import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineStackFrameItem
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.State
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
 import java.awt.*
@@ -32,10 +37,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     private val panelContent = Box.createVerticalBox()
     private val forest = Box.createVerticalBox()
 
-    data class CoroutineTrace(val locations: MutableList<Location?>, val header: String, val hoverContent: String)
+    data class CoroutineTrace(val stackFrameItems: MutableList<CoroutineStackFrameItem?>, val header: String, val hoverContent: String)
 
     data class Node(
-        val stackFrameLocation: Location? = null,
+        val stackFrameItem: CoroutineStackFrameItem? = null,
         var num: Int = 0, // Represents how many coroutines have this frame in their stack trace
         val children: MutableMap<Location, Node> = mutableMapOf(),
         var coroutinesActive: String = ""
@@ -281,7 +286,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
             if (parent != null && parent.num != currentNode.num) {
                 val currentTrace = CoroutineTrace(
-                    mutableListOf(currentNode.stackFrameLocation),
+                    mutableListOf(currentNode.stackFrameItem),
                     CoroutineStacksBundle.message("number.of.coroutines.active", currentNode.num),
                     currentNode.coroutinesActive
                 )
@@ -291,7 +296,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 coroutineTraces.add(currentTrace)
                 previousLevel = currentLevel
             } else if (parent != null) {
-                coroutineTraces.lastOrNull()?.locations?.add(0, currentNode.stackFrameLocation)
+                coroutineTraces.lastOrNull()?.stackFrameItems?.add(0, currentNode.stackFrameItem)
             }
 
             currentNode.children.values.reversed().forEach { child ->
@@ -323,25 +328,39 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             override fun mouseClicked(e: MouseEvent?) {
                 val list = e?.source as? JBList<*> ?: return
                 val index = list.locationToIndex(e.point).takeIf { it > 0 } ?: return
-                val location = trace.locations[index - 1]
-                debugProcess.managerThread.invoke(object : DebuggerCommandImpl() {
-                    override fun action() {
-                        val positionManager = debugProcess.positionManager
-                        val sourcePosition = positionManager.getSourcePosition(location)
-                        sourcePosition?.navigate(true)
+                val stackFrameItem = trace.stackFrameItems[index - 1]
+
+                stackFrameItem?.let { frameItem ->
+                    val frame = frameItem.createFrame(debugProcess)
+
+                    if (activeExecutionStack != null && frame != null) {
+                        setCurrentStackFrame(activeExecutionStack, frame)
                     }
-                })
+                }
+
             }
         })
 
         return vertex
     }
 
+    private fun SuspendContextImpl.setCurrentStackFrame(executionStack: XExecutionStack?, stackFrame: XStackFrame) {
+        val fileToNavigate = stackFrame.sourcePosition?.file ?: return
+        val session = debugProcess.session.xDebugSession ?: return
+        if (!ClsClassFinder.isKotlinInternalCompiledFile(fileToNavigate)) {
+            ApplicationManager.getApplication().invokeLater {
+                if (executionStack != null) {
+                    session.setCurrentStackFrame(executionStack, stackFrame, false)
+                }
+            }
+        }
+    }
+
     private fun createVertexAndData(trace: CoroutineTrace): Pair<JBList<String>, MutableList<String>> {
         val vertex = JBList<String>()
         val data = mutableListOf<String>()
         data.add(trace.header)
-        data.addAll(trace.locations.map { it.toString() })
+        data.addAll(trace.stackFrameItems.map { it.toString() })
         vertex.setListData(data.toTypedArray())
         return Pair(vertex, data)
     }
@@ -359,7 +378,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
 
                 if (child != null) {
                     if (coroutineData.descriptor.state == State.RUNNING) {
-                        lastRunningStackFrame = child.stackFrameLocation.toString()
+                        lastRunningStackFrame = child.stackFrameItem.toString()
                     }
 
                     child.num++
@@ -371,7 +390,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     }
 
                     val node = Node(
-                        location,
+                        stackFrame,
                         1,
                         mutableMapOf(),
                         "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state}\n"
