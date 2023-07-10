@@ -5,9 +5,7 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
-import com.nikitanazarov.coroutinestacks.ui.ContainerWithEdges
-import com.nikitanazarov.coroutinestacks.ui.ForestLayout
-import com.nikitanazarov.coroutinestacks.ui.Separator
+import com.nikitanazarov.coroutinestacks.ui.*
 import java.util.*
 import javax.swing.JList
 import javax.swing.JScrollPane
@@ -106,7 +104,9 @@ private fun createExamplePanel(): JScrollPane {
     secondTree.forEach { forest.add(it) }
     firstTree.forEach { forest.add(it) }
     forest.layout = ForestLayout()
-    return JBScrollPane(forest)
+    val panel = DraggablePanel()
+    panel.add(forest)
+    return JBScrollPane(panel)
 }
 
 fun createList(): JList<String> {
