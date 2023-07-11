@@ -37,42 +37,25 @@ data class CoroutineTrace(val stackFrameItems: MutableList<CoroutineStackFrameIt
 private fun CoroutineInfoData.render(): String =
     "${descriptor.name}${descriptor.id} ${descriptor.state}\n"
 
-private fun createRoundedBorder(color: JBColor): Border {
-    val cornerRadius = Constants.cornerRadius
-    val borderThickness = Constants.borderThickness
-
-    val roundedBorder = object : LineBorder(color, borderThickness) {
-        override fun getBorderInsets(c: Component?): Insets {
-            val insets = super.getBorderInsets(c)
-            return JBUI.insets(insets.top, insets.left, insets.bottom, insets.right)
-        }
-
-        override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
-            val g2d = g as? Graphics2D ?: return
-            val arc = 2 * cornerRadius
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g2d.color = color
-            g2d.drawRoundRect(x, y, width - 1, height - 1, arc, arc)
-        }
-    }
-
-    return roundedBorder
-}
-
 fun SuspendContextImpl.buildCoroutineStackForest(
     rootValue: Node,
-    coroutineDataList: MutableList<CoroutineInfoData>,
-): JBScrollPane {
+    coroutineDataList: MutableList<CoroutineInfoData>
+): JBScrollPane? {
     val lastRunningStackFrame = buildStackFrameGraph(coroutineDataList, rootValue)
     val coroutineTraces = createCoroutineTraces(rootValue)
     return createCoroutineTraceForest(coroutineTraces, lastRunningStackFrame)
 }
 
-private fun SuspendContextImpl.createCoroutineTraceForest(traces: List<CoroutineTrace?>, lastRunningStackFrame: String): JBScrollPane {
+private fun SuspendContextImpl.createCoroutineTraceForest(
+    traces: List<CoroutineTrace?>,
+    lastRunningStackFrame: String
+): JBScrollPane? {
+    if (traces.isEmpty()) return null
     val vertexData: MutableList<JBList<String>?> = mutableListOf()
     val componentData: MutableList<Component> = mutableListOf()
     var previousListSelection: JBList<*>? = null
     var maxWidth = 0
+    var traceNotNullCount = 0
 
     traces.forEach { trace ->
         if (trace == null) {
@@ -80,7 +63,7 @@ private fun SuspendContextImpl.createCoroutineTraceForest(traces: List<Coroutine
             return@forEach
         }
 
-        val vertex = createCoroutineTraceUI(trace, lastRunningStackFrame)
+        val vertex = CoroutineTraceUI(trace, lastRunningStackFrame, this).getVertex()
         vertex.addListSelectionListener { e ->
             val currentList = e.source as? JBList<*> ?: return@addListSelectionListener
             if (previousListSelection != currentList) {
@@ -90,9 +73,10 @@ private fun SuspendContextImpl.createCoroutineTraceForest(traces: List<Coroutine
         }
         vertexData.add(vertex)
         maxWidth += vertex.preferredWidth
+        traceNotNullCount += 1
     }
 
-    val averagePreferredWidth = maxWidth / traces.filterNotNull().size.coerceAtLeast(1)
+    val averagePreferredWidth = maxWidth / traceNotNullCount
     vertexData.forEach { vertex ->
         if (vertex != null) {
             vertex.preferredWidth = averagePreferredWidth
@@ -143,39 +127,81 @@ private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
     return coroutineTraces
 }
 
-private fun SuspendContextImpl.createCoroutineTraceUI(
-    trace: CoroutineTrace,
-    lastRunningStackFrame: String
-): JBList<String> {
-    val (vertex, data) = createVertexAndData(trace)
-    val lastStackFrame = data[1]
+private class CoroutineTraceUI(
+    private val trace: CoroutineTrace,
+    private val lastRunningStackFrame: String,
+    private val suspendContextImpl: SuspendContextImpl
+    ) {
+    private val vertex: JBList<String> = createVertex()
 
-    val border = if (lastRunningStackFrame == lastStackFrame) {
-        createRoundedBorder(JBColor.BLUE)
-    } else {
-        createRoundedBorder(JBColor.BLACK)
+    init {
+        setupUI()
     }
-    vertex.border = border
 
-    vertex.cellRenderer = CoroutineStacksPanel.CustomCellRenderer(trace.coroutinesActiveLabel)
-    vertex.addMouseListener(object : MouseAdapter() {
-        override fun mouseClicked(e: MouseEvent?) {
-            val list = e?.source as? JBList<*> ?: return
-            val index = list.locationToIndex(e.point).takeIf { it > 0 } ?: return
-            val stackFrameItem = trace.stackFrameItems[index - 1]
+    fun getVertex(): JBList<String> {
+        return vertex
+    }
 
-            stackFrameItem?.let { frameItem ->
-                val frame = frameItem.createFrame(debugProcess)
+    private fun createRoundedBorder(color: JBColor): Border {
+        val cornerRadius = Constants.cornerRadius
+        val borderThickness = Constants.borderThickness
 
-                if (activeExecutionStack != null && frame != null) {
-                    setCurrentStackFrame(activeExecutionStack, frame)
-                }
+        val roundedBorder = object : LineBorder(color, borderThickness) {
+            override fun getBorderInsets(c: Component?): Insets {
+                val insets = super.getBorderInsets(c)
+                return JBUI.insets(insets.top, insets.left, insets.bottom, insets.right)
             }
 
+            override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
+                val g2d = g as? Graphics2D ?: return
+                val arc = 2 * cornerRadius
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = color
+                g2d.drawRoundRect(x, y, width - 1, height - 1, arc, arc)
+            }
         }
-    })
 
-    return vertex
+        return roundedBorder
+    }
+
+    private fun createVertex(): JBList<String> {
+        val vertex = JBList<String>()
+        val data = mutableListOf<String>()
+        data.add(trace.header)
+        data.addAll(trace.stackFrameItems.map { it.toString() })
+        vertex.setListData(data.toTypedArray())
+        val lastStackFrame = data.getOrNull(1)
+
+        vertex.border = if (lastRunningStackFrame == lastStackFrame) {
+            createRoundedBorder(JBColor.BLUE)
+        } else {
+            createRoundedBorder(JBColor.BLACK)
+        }
+
+        return vertex
+    }
+
+    private fun setupUI() {
+        val debugProcess = suspendContextImpl.debugProcess
+        val activeExecutionStack = suspendContextImpl.activeExecutionStack
+
+        vertex.cellRenderer = CoroutineStacksPanel.CustomCellRenderer(trace.coroutinesActiveLabel)
+        vertex.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent?) {
+                val list = e?.source as? JBList<*> ?: return
+                val index = list.locationToIndex(e.point).takeIf { it > 0 } ?: return
+                val stackFrameItem = trace.stackFrameItems[index - 1]
+
+                stackFrameItem?.let { frameItem ->
+                    val frame = frameItem.createFrame(debugProcess)
+
+                    if (activeExecutionStack != null && frame != null) {
+                        suspendContextImpl.setCurrentStackFrame(activeExecutionStack, frame)
+                    }
+                }
+            }
+        })
+    }
 }
 
 private fun SuspendContextImpl.setCurrentStackFrame(executionStack: XExecutionStack?, stackFrame: XStackFrame) {
@@ -190,15 +216,6 @@ private fun SuspendContextImpl.setCurrentStackFrame(executionStack: XExecutionSt
     }
 }
 
-private fun createVertexAndData(trace: CoroutineTrace): Pair<JBList<String>, MutableList<String>> {
-    val vertex = JBList<String>()
-    val data = mutableListOf<String>()
-    data.add(trace.header)
-    data.addAll(trace.stackFrameItems.map { it.toString() })
-    vertex.setListData(data.toTypedArray())
-    return Pair(vertex, data)
-}
-
 private fun SuspendContextImpl.buildStackFrameGraph(
     coroutineDataList: List<CoroutineInfoData>,
     rootValue: Node
@@ -208,8 +225,8 @@ private fun SuspendContextImpl.buildStackFrameGraph(
     coroutineDataList.forEach { coroutineData ->
         var currentNode = rootValue
 
-        val doubleFrameList = CoroutineFrameBuilder.build(coroutineData, this)
-        doubleFrameList?.frames?.reversed()?.forEach { stackFrame ->
+        val coroutineFrameItemLists = CoroutineFrameBuilder.build(coroutineData, this)
+        coroutineFrameItemLists?.frames?.reversed()?.forEach { stackFrame ->
             val location = stackFrame.location
             val child = currentNode.children[location]
 

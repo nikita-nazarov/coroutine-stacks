@@ -169,7 +169,10 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         val coroutineStackForest = suspendContextImpl.buildCoroutineStackForest(
             root,
             coroutineDataList
-        )
+        ) ?: run {
+            emptyText.text = CoroutineStacksBundle.message("nothing.to.show")
+            return
+        }
         forest.add(coroutineStackForest)
         updateUI()
     }
