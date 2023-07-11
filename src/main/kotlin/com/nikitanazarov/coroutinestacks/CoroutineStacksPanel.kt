@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineStackFrameItem
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.State
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineDebugProbesProxy
+import org.jetbrains.kotlin.idea.debugger.coroutine.util.CoroutineFrameBuilder
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -96,11 +97,8 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         if (currentSession != null) {
             val currentProcess = (currentSession.debugProcess as JavaDebugProcess).debuggerSession.process
             emptyText.component.isVisible = false
-            currentProcess.managerThread.invoke(object : DebuggerCommandImpl() {
-                override fun action() {
-                    buildCoroutineGraph(currentProcess.suspendManager.pausedContext)
-                }
-            })
+            val suspendContext = currentProcess.suspendManager.pausedContext
+            buildCoroutineGraphInDebuggerManagerThread(suspendContext)
 
             currentProcess.addDebugProcessListener(createPanelBuilderListener())
         }
@@ -121,6 +119,17 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                     panelContent.removeAll()
                 }
             })
+    }
+
+    private fun buildCoroutineGraphInDebuggerManagerThread(
+        suspendContextImpl: SuspendContextImpl
+    ) {
+        val currentProcess = suspendContextImpl.debugProcess
+        currentProcess.managerThread.invoke(object : DebuggerCommandImpl() {
+            override fun action() {
+                buildCoroutineGraph(suspendContextImpl)
+            }
+        })
     }
 
     private fun createRoundedBorder(color: JBColor): Border {
@@ -151,7 +160,11 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
     private fun createPanelBuilderListener() = object : DebugProcessListener {
         override fun paused(suspendContext: SuspendContext) {
             emptyText.component.isVisible = false
-            buildCoroutineGraph(suspendContext)
+            val suspendContextImpl = suspendContext as? SuspendContextImpl ?: run {
+                emptyText.text = CoroutineStacksBundle.message("coroutine.stacks.could.not.be.built")
+                return
+            }
+            buildCoroutineGraphInDebuggerManagerThread(suspendContextImpl)
         }
 
         override fun resumed(suspendContext: SuspendContext?) {
@@ -159,12 +172,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
     }
 
-    fun buildCoroutineGraph(suspendContext: SuspendContext) {
-        val suspendContextImpl = suspendContext as? SuspendContextImpl ?: run {
-            emptyText.text = CoroutineStacksBundle.message("coroutine.stacks.could.not.be.built")
-            return
-        }
-
+    fun buildCoroutineGraph(suspendContextImpl: SuspendContextImpl) {
         val coroutineInfoCache = CoroutineDebugProbesProxy(suspendContextImpl).dumpCoroutines()
         val coroutineInfoDataList = coroutineInfoCache.cache
         val dispatcherToCoroutineDataList = mutableMapOf<String, MutableList<CoroutineInfoData>>()
@@ -271,7 +279,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             val vertex = createVertexAndData(trace).first
             vertex.preferredWidth
         }
-        return maxWidth / validTraces.size
+        return maxWidth / validTraces.size.coerceAtLeast(1)
     }
 
     private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
@@ -365,40 +373,43 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         return Pair(vertex, data)
     }
 
-    private fun buildStackFrameGraph(
+    private fun SuspendContextImpl.buildStackFrameGraph(
         coroutineDataList: List<CoroutineInfoData>,
         rootValue: Node
     ): String {
         var lastRunningStackFrame = ""
+
         coroutineDataList.forEach { coroutineData ->
-            var currentNode = rootValue
-            coroutineData.stackTrace.reversed().forEach { stackFrame ->
-                val location = stackFrame.location
-                val child = currentNode.children[location]
+                var currentNode = rootValue
 
-                if (child != null) {
-                    if (coroutineData.descriptor.state == State.RUNNING) {
-                        lastRunningStackFrame = child.stackFrameItem.toString()
+                val doubleFrameList = CoroutineFrameBuilder.build(coroutineData, this)
+                doubleFrameList?.frames?.reversed()?.forEach { stackFrame ->
+                    val location = stackFrame.location
+                    val child = currentNode.children[location]
+
+                    if (child != null) {
+                        if (coroutineData.descriptor.state == State.RUNNING) {
+                            lastRunningStackFrame = child.stackFrameItem.toString()
+                        }
+
+                        child.num++
+                        child.coroutinesActive += "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state}\n"
+                        currentNode = child
+                    } else {
+                        if (coroutineData.descriptor.state == State.RUNNING) {
+                            lastRunningStackFrame = location.toString()
+                        }
+
+                        val node = Node(
+                            stackFrame,
+                            1,
+                            mutableMapOf(),
+                            "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state}\n"
+                        )
+                        currentNode.children[location] = node
+                        currentNode = node
                     }
-
-                    child.num++
-                    child.coroutinesActive += "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state}\n"
-                    currentNode = child
-                } else {
-                    if (coroutineData.descriptor.state == State.RUNNING) {
-                        lastRunningStackFrame = location.toString()
-                    }
-
-                    val node = Node(
-                        stackFrame,
-                        1,
-                        mutableMapOf(),
-                        "${coroutineData.descriptor.name}${coroutineData.descriptor.id} ${coroutineData.descriptor.state}\n"
-                    )
-                    currentNode.children[location] = node
-                    currentNode = node
                 }
-            }
         }
         return lastRunningStackFrame
     }
