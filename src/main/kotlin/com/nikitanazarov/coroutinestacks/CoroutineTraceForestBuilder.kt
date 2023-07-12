@@ -96,24 +96,27 @@ private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
     while (stack.isNotEmpty()) {
         val (currentNode, currentLevel) = stack.pop()
         val parent = if (parentStack.isNotEmpty()) parentStack.pop() else null
-        var coroutineStackHeader = CoroutineStacksBundle.message("number.of.coroutine")
-
-        if (parent != null && parent.num != currentNode.num) {
-            if (currentNode.num > 1)
-                coroutineStackHeader = CoroutineStacksBundle.message("number.of.coroutines", currentNode.num)
-            val currentTrace = CoroutineTrace(
-                mutableListOf(currentNode.stackFrameItem),
-                coroutineStackHeader,
-                currentNode.coroutinesActive
-            )
-            repeat((previousLevel ?: 0) - currentLevel + 1) {
-                coroutineTraces.add(null)
-            }
-            coroutineTraces.add(currentTrace)
-            previousLevel = currentLevel
-        } else if (parent != null) {
-            coroutineTraces.lastOrNull()?.stackFrameItems?.add(0, currentNode.stackFrameItem)
+        val coroutineStackHeader = if (currentNode.num > 1) {
+            CoroutineStacksBundle.message("number.of.coroutines", currentNode.num)
+        } else {
+            CoroutineStacksBundle.message("number.of.coroutine")
         }
+
+            if (parent != null && parent.num != currentNode.num) {
+                val currentTrace = CoroutineTrace(
+                    mutableListOf(currentNode.stackFrameItem),
+                    coroutineStackHeader,
+                    currentNode.coroutinesActive
+                )
+                repeat((previousLevel ?: 0) - currentLevel + 1) {
+                    coroutineTraces.add(null)
+                }
+                coroutineTraces.add(currentTrace)
+                previousLevel = currentLevel
+            } else if (parent != null) {
+                coroutineTraces.lastOrNull()?.stackFrameItems?.add(0, currentNode.stackFrameItem)
+            }
+
 
         currentNode.children.values.reversed().forEach { child ->
             stack.push(child to (currentLevel + 1))
