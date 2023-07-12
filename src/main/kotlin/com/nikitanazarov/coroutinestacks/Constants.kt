@@ -6,5 +6,6 @@ class Constants {
         const val comboBoxWidth = 25
         const val cornerRadius = 10
         const val borderThickness = 1
+        const val leftPaddingForBorder = 3
     }
 }

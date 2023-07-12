@@ -1,4 +1,4 @@
-package com.nikitanazarov.coroutinestacks
+package com.nikitanazarov.coroutinestacks.ui
 
 import com.intellij.debugger.engine.SuspendContextImpl
 import com.intellij.openapi.application.ApplicationManager
@@ -7,6 +7,8 @@ import com.intellij.ui.components.JBList
 import com.intellij.util.ui.JBUI
 import com.intellij.xdebugger.frame.XExecutionStack
 import com.intellij.xdebugger.frame.XStackFrame
+import com.nikitanazarov.coroutinestacks.Constants
+import com.nikitanazarov.coroutinestacks.CoroutineTrace
 import org.jetbrains.kotlin.analysis.decompiler.stub.file.ClsClassFinder
 import java.awt.*
 import java.awt.event.MouseAdapter
@@ -23,6 +25,12 @@ class CoroutineFramesList(
     trace: CoroutineTrace,
     lastRunningStackFrame: String
 ) : JBList<String>() {
+    companion object {
+        private val itemBorder = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
+        private val leftPaddingBorder: Border = JBUI.Borders.emptyLeft(Constants.leftPaddingForBorder)
+        private val compoundBorder = BorderFactory.createCompoundBorder(itemBorder, leftPaddingBorder)
+    }
+
     init {
         val debugProcess = suspendContext.debugProcess
 
@@ -93,11 +101,7 @@ class CoroutineFramesList(
 
     class CustomCellRenderer(
         private val coroutinesActive: String?,
-        padding: Int = 3
     ) : DefaultListCellRenderer() {
-        private val itemBorder = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
-        private val leftPaddingBorder: Border = JBUI.Borders.emptyLeft(padding)
-        private val compoundBorder = BorderFactory.createCompoundBorder(itemBorder, leftPaddingBorder)
 
         override fun getListCellRendererComponent(
             list: JList<*>,

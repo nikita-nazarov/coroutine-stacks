@@ -26,9 +26,9 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         if (currentSession != null) {
             val javaDebugProcess = currentSession.debugProcess as? JavaDebugProcess
             val currentProcess = javaDebugProcess?.debuggerSession?.process
-            emptyText.component.isVisible = false
             currentProcess?.managerThread?.invoke(object : DebuggerCommandImpl() {
                 override fun action() {
+                    emptyText.component.isVisible = false
                     buildCoroutineGraph(currentProcess.suspendManager.pausedContext)
                 }
             })
@@ -80,7 +80,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         }
 
         val dispatcherLabel = JLabel(CoroutineStacksBundle.message("select.dispatcher"))
-        val coroutineStacksWindowHeader = Box.createHorizontalBox()
+        val coroutineStacksPanelHeader = Box.createHorizontalBox()
         val dispatchers = dispatcherToCoroutineDataList.keys.toTypedArray()
         val dispatcherDropdownMenu = ComboBox(dispatchers)
 
@@ -98,8 +98,8 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
             maximumSize = comboBoxSize
             minimumSize = comboBoxSize
         }
-        coroutineStacksWindowHeader.add(dispatcherLabel)
-        coroutineStacksWindowHeader.add(dispatcherDropdownMenu)
+        coroutineStacksPanelHeader.add(dispatcherLabel)
+        coroutineStacksPanelHeader.add(dispatcherDropdownMenu)
 
         dispatcherToCoroutineDataList.forEach { (dispatcher, coroutineDataList) ->
             coroutineDataList.forEach { data ->
@@ -114,7 +114,7 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
         if (!coroutineDataList.isNullOrEmpty()) {
             updateCoroutineStackForest(coroutineDataList, suspendContextImpl)
         }
-        panelContent.add(coroutineStacksWindowHeader)
+        panelContent.add(coroutineStacksPanelHeader)
         panelContent.add(forest)
         add(panelContent)
     }
@@ -129,7 +129,9 @@ class CoroutineStacksPanel(project: Project) : JBPanelWithEmptyText() {
                 val coroutineStackForest = suspendContextImpl.buildCoroutineStackForest(
                     root,
                     coroutineDataList
-                ) ?: run {
+                )
+                if (coroutineStackForest == null)
+                {
                     emptyText.text = CoroutineStacksBundle.message("nothing.to.show")
                     return
                 }

@@ -4,10 +4,7 @@ import com.intellij.debugger.engine.SuspendContextImpl
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.util.preferredWidth
-import com.nikitanazarov.coroutinestacks.ui.ContainerWithEdges
-import com.nikitanazarov.coroutinestacks.ui.DraggablePanel
-import com.nikitanazarov.coroutinestacks.ui.ForestLayout
-import com.nikitanazarov.coroutinestacks.ui.Separator
+import com.nikitanazarov.coroutinestacks.ui.*
 import com.sun.jdi.Location
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineStackFrameItem
@@ -136,8 +133,8 @@ private fun SuspendContextImpl.buildStackFrameGraph(
     coroutineDataList.forEach { coroutineData ->
         var currentNode = rootValue
 
-        val coroutineFrameItemLists = CoroutineFrameBuilder.build(coroutineData, this)
-        coroutineFrameItemLists?.frames?.reversed()?.forEach { stackFrame ->
+        val coroutineFrameItemLists = CoroutineFrameBuilder.build(coroutineData, this) ?: return@forEach
+        coroutineFrameItemLists.frames.reversed().forEach { stackFrame ->
             val location = stackFrame.location
             val child = currentNode.children[location]
 
