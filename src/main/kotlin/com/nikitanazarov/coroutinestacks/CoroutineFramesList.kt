@@ -25,7 +25,6 @@ class CoroutineFramesList(
 ) : JBList<String>() {
     init {
         val debugProcess = suspendContext.debugProcess
-        val activeExecutionStack = suspendContext.activeExecutionStack
 
         val data = mutableListOf<String>()
         data.add(trace.header)
@@ -49,8 +48,8 @@ class CoroutineFramesList(
                 stackFrameItem?.let { frameItem ->
                     val frame = frameItem.createFrame(debugProcess)
 
-                    if (activeExecutionStack != null && frame != null) {
-                        suspendContext.setCurrentStackFrame(activeExecutionStack, frame)
+                    if (suspendContext.activeExecutionStack != null && frame != null) {
+                        suspendContext.setCurrentStackFrame(suspendContext.activeExecutionStack, frame)
                     }
                 }
             }
