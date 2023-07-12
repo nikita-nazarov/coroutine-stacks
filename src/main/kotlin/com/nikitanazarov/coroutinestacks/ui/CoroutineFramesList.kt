@@ -46,7 +46,38 @@ class CoroutineFramesList(
             createRoundedBorder(JBColor.BLACK)
         }
 
-        cellRenderer = CustomCellRenderer(trace.coroutinesActiveLabel)
+        cellRenderer = object : DefaultListCellRenderer() {
+            override fun getListCellRendererComponent(
+                list: JList<*>,
+                value: Any,
+                index: Int,
+                isSelected: Boolean,
+                cellHasFocus: Boolean
+            ): Component {
+                val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                if (renderer !is JComponent) {
+                    return renderer
+                }
+
+                with(renderer) {
+                    val listSize = list.model.size
+                    if (index == 0) {
+                        toolTipText = trace.coroutinesActiveLabel
+                        font = font.deriveFont(Font.BOLD)
+                    } else if (index < listSize) {
+                        toolTipText = value.toString()
+                    }
+                    border = when {
+                        index < listSize - 1 -> compoundBorder
+                        index == listSize - 1 -> leftPaddingBorder
+                        else -> null
+                    }
+                }
+
+                return renderer
+            }
+        }
+
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent?) {
                 val list = e?.source as? JBList<*> ?: return
@@ -97,40 +128,5 @@ class CoroutineFramesList(
         }
 
         return roundedBorder
-    }
-
-    class CustomCellRenderer(
-        private val coroutinesActive: String?,
-    ) : DefaultListCellRenderer() {
-
-        override fun getListCellRendererComponent(
-            list: JList<*>,
-            value: Any,
-            index: Int,
-            isSelected: Boolean,
-            cellHasFocus: Boolean
-        ): Component {
-            val renderer = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            if (renderer !is JComponent) {
-                return renderer
-            }
-
-            with(renderer) {
-                val listSize = list.model.size
-                if (index == 0) {
-                    toolTipText = coroutinesActive
-                    font = font.deriveFont(Font.BOLD)
-                } else if (index < listSize) {
-                    toolTipText = value.toString()
-                }
-                border = when {
-                    index < listSize - 1 -> compoundBorder
-                    index == listSize - 1 -> leftPaddingBorder
-                    else -> null
-                }
-            }
-
-            return renderer
-        }
     }
 }
