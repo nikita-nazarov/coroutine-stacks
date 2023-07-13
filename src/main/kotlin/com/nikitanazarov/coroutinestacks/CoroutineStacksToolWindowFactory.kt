@@ -20,7 +20,7 @@ class CoroutineStacksToolWindowFactory : ToolWindowFactory {
 // This code serves as example on how to use the ForestLayout.
 // It will be deleted in the future.
 private fun createExamplePanel(): JScrollPane {
-    val forest = ContainerWithEdges()
+    val forest = DraggableContainerWithEdges()
     val firstTree = listOf(
         createList(),
         createList(),
@@ -104,9 +104,7 @@ private fun createExamplePanel(): JScrollPane {
     secondTree.forEach { forest.add(it) }
     firstTree.forEach { forest.add(it) }
     forest.layout = ForestLayout()
-    val panel = DraggablePanel()
-    panel.add(forest)
-    return JBScrollPane(panel)
+    return JBScrollPane(forest)
 }
 
 fun createList(): JList<String> {
