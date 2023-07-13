@@ -6,9 +6,8 @@ import java.awt.geom.Path2D
 
 class ContainerWithEdges : Container() {
     companion object {
-        val bezierCurveControlPointOffset = 20
-        val edgeWidth = 1.0F
-        val edgeColor = JBColor.BLUE
+        const val BEZIER_CURVE_CONTROL_POINT_OFFSET = 20
+        const val EDGE_WIDTH = 1.0F
     }
 
     override fun paint(g: Graphics) {
@@ -32,16 +31,16 @@ class ContainerWithEdges : Container() {
         val path = Path2D.Double()
         path.moveTo(start.x.toDouble(), start.y.toDouble())
         path.curveTo(
-            start.x.toDouble(), start.y.toDouble() - bezierCurveControlPointOffset,
-            end.x.toDouble(), end.y.toDouble() + bezierCurveControlPointOffset,
+            start.x.toDouble(), start.y.toDouble() - BEZIER_CURVE_CONTROL_POINT_OFFSET,
+            end.x.toDouble(), end.y.toDouble() + BEZIER_CURVE_CONTROL_POINT_OFFSET,
             end.x.toDouble(), end.y.toDouble()
         )
         return path
     }
 
     private fun updateGraphicsPreferences(g: Graphics2D) {
-        g.stroke = BasicStroke(edgeWidth)
-        g.color = edgeColor
+        g.stroke = BasicStroke(EDGE_WIDTH)
+        g.color = JBColor.BLUE
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
     }
 }

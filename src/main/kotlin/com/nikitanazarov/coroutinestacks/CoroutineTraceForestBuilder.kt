@@ -20,9 +20,11 @@ data class Node(
     var coroutinesActive: String = ""
 )
 
-data class CoroutineTrace(val stackFrameItems: MutableList<CoroutineStackFrameItem?>,
-                          val header: String,
-                          val coroutinesActiveLabel: String)
+data class CoroutineTrace(
+    val stackFrameItems: MutableList<CoroutineStackFrameItem?>,
+    val header: String,
+    val coroutinesActiveLabel: String
+)
 
 fun SuspendContextImpl.buildCoroutineStackForest(
     rootValue: Node,
@@ -81,10 +83,7 @@ private fun SuspendContextImpl.createCoroutineTraceForest(
     val forest = ContainerWithEdges()
     componentData.forEach { forest.add(it) }
     forest.layout = ForestLayout()
-    val panel = DraggablePanel()
-    panel.add(forest)
-
-    return JBScrollPane(panel)
+    return DraggableScrollPane(forest)
 }
 
 private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
@@ -102,21 +101,20 @@ private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
             CoroutineStacksBundle.message("number.of.coroutine")
         }
 
-            if (parent != null && parent.num != currentNode.num) {
-                val currentTrace = CoroutineTrace(
-                    mutableListOf(currentNode.stackFrameItem),
-                    coroutineStackHeader,
-                    currentNode.coroutinesActive
-                )
-                repeat((previousLevel ?: 0) - currentLevel + 1) {
-                    coroutineTraces.add(null)
-                }
-                coroutineTraces.add(currentTrace)
-                previousLevel = currentLevel
-            } else if (parent != null) {
-                coroutineTraces.lastOrNull()?.stackFrameItems?.add(0, currentNode.stackFrameItem)
+        if (parent != null && parent.num != currentNode.num) {
+            val currentTrace = CoroutineTrace(
+                mutableListOf(currentNode.stackFrameItem),
+                coroutineStackHeader,
+                currentNode.coroutinesActive
+            )
+            repeat((previousLevel ?: 0) - currentLevel + 1) {
+                coroutineTraces.add(null)
             }
-
+            coroutineTraces.add(currentTrace)
+            previousLevel = currentLevel
+        } else if (parent != null) {
+            coroutineTraces.lastOrNull()?.stackFrameItems?.add(0, currentNode.stackFrameItem)
+        }
 
         currentNode.children.values.reversed().forEach { child ->
             stack.push(child to (currentLevel + 1))

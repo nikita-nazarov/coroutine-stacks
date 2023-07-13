@@ -3,11 +3,12 @@ package com.nikitanazarov.coroutinestacks.ui
 import com.intellij.debugger.engine.SuspendContextImpl
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.ui.JBColor
+import com.intellij.ui.JBColor.BLACK
+import com.intellij.ui.JBColor.BLUE
 import com.intellij.ui.components.JBList
 import com.intellij.util.ui.JBUI
 import com.intellij.xdebugger.frame.XExecutionStack
 import com.intellij.xdebugger.frame.XStackFrame
-import com.nikitanazarov.coroutinestacks.Constants
 import com.nikitanazarov.coroutinestacks.CoroutineTrace
 import org.jetbrains.kotlin.analysis.decompiler.stub.file.ClsClassFinder
 import java.awt.*
@@ -27,8 +28,10 @@ class CoroutineFramesList(
 ) : JBList<String>() {
     companion object {
         private val itemBorder = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
-        private val leftPaddingBorder: Border = JBUI.Borders.emptyLeft(Constants.leftPaddingForBorder)
+        private val leftPaddingBorder: Border = JBUI.Borders.emptyLeft(3)
         private val compoundBorder = BorderFactory.createCompoundBorder(itemBorder, leftPaddingBorder)
+        private const val cornerRadius = 3
+        private const val borderThickness = 1
     }
 
     init {
@@ -40,10 +43,25 @@ class CoroutineFramesList(
         setListData(data.toTypedArray())
         val lastStackFrame = data.getOrNull(1)
 
-        border = if (lastRunningStackFrame == lastStackFrame) {
-            createRoundedBorder(JBColor.BLUE)
+        val borderColor = if (lastRunningStackFrame == lastStackFrame) {
+            BLUE
         } else {
-            createRoundedBorder(JBColor.BLACK)
+            BLACK
+        }
+
+        border =  object : LineBorder(borderColor, borderThickness) {
+            override fun getBorderInsets(c: Component?): Insets {
+                val insets = super.getBorderInsets(c)
+                return JBUI.insets(insets.top, insets.left, insets.bottom, insets.right)
+            }
+
+            override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
+                val g2d = g as? Graphics2D ?: return
+                val arc = 2 * cornerRadius
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = borderColor
+                g2d.drawRoundRect(x, y, width - 1, height - 1, arc, arc)
+            }
         }
 
         cellRenderer = object : DefaultListCellRenderer() {
@@ -82,51 +100,25 @@ class CoroutineFramesList(
             override fun mouseClicked(e: MouseEvent?) {
                 val list = e?.source as? JBList<*> ?: return
                 val index = list.locationToIndex(e.point).takeIf { it > 0 } ?: return
-                val stackFrameItem = trace.stackFrameItems[index - 1]
+                val stackFrameItem = trace.stackFrameItems[index - 1] ?: return
 
-                stackFrameItem?.let { frameItem ->
-                    val frame = frameItem.createFrame(debugProcess)
-
-                    if (suspendContext.activeExecutionStack != null && frame != null) {
-                        suspendContext.setCurrentStackFrame(suspendContext.activeExecutionStack, frame)
-                    }
+                val frame = stackFrameItem.createFrame(debugProcess)
+                val xExecutionStack = suspendContext.activeExecutionStack as? XExecutionStack
+                if (xExecutionStack != null && frame != null) {
+                    suspendContext.setCurrentStackFrame(xExecutionStack, frame)
                 }
             }
         })
     }
+}
 
-    // Copied from org.jetbrains.kotlin.idea.debugger.coroutine.view.CoroutineSelectedNodeListener#setCurrentStackFrame
-    private fun SuspendContextImpl.setCurrentStackFrame(executionStack: XExecutionStack?, stackFrame: XStackFrame) {
-        val fileToNavigate = stackFrame.sourcePosition?.file ?: return
-        val session = debugProcess.session.xDebugSession ?: return
-        if (!ClsClassFinder.isKotlinInternalCompiledFile(fileToNavigate)) {
-            ApplicationManager.getApplication().invokeLater {
-                if (executionStack != null) {
-                    session.setCurrentStackFrame(executionStack, stackFrame, false)
-                }
-            }
+// Copied from org.jetbrains.kotlin.idea.debugger.coroutine.view.CoroutineSelectedNodeListener#setCurrentStackFrame
+private fun SuspendContextImpl.setCurrentStackFrame(executionStack: XExecutionStack, stackFrame: XStackFrame) {
+    val fileToNavigate = stackFrame.sourcePosition?.file ?: return
+    val session = debugProcess.session.xDebugSession ?: return
+    if (!ClsClassFinder.isKotlinInternalCompiledFile(fileToNavigate)) {
+        ApplicationManager.getApplication().invokeLater {
+            session.setCurrentStackFrame(executionStack, stackFrame, false)
         }
-    }
-
-    private fun createRoundedBorder(color: JBColor): Border {
-        val cornerRadius = Constants.cornerRadius
-        val borderThickness = Constants.borderThickness
-
-        val roundedBorder = object : LineBorder(color, borderThickness) {
-            override fun getBorderInsets(c: Component?): Insets {
-                val insets = super.getBorderInsets(c)
-                return JBUI.insets(insets.top, insets.left, insets.bottom, insets.right)
-            }
-
-            override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
-                val g2d = g as? Graphics2D ?: return
-                val arc = 2 * cornerRadius
-                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                g2d.color = color
-                g2d.drawRoundRect(x, y, width - 1, height - 1, arc, arc)
-            }
-        }
-
-        return roundedBorder
     }
 }

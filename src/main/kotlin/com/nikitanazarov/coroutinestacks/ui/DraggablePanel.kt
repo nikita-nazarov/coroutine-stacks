@@ -1,11 +1,10 @@
 package com.nikitanazarov.coroutinestacks.ui
 
+import com.intellij.ui.components.JBScrollPane
 import java.awt.*
 import java.awt.event.*
-import javax.swing.JPanel
-import javax.swing.JViewport
 
-class DraggablePanel : JPanel(), MouseListener, MouseMotionListener {
+class DraggableScrollPane(component: Component) : JBScrollPane(component), MouseListener, MouseMotionListener {
     private var holdPointOnView: Point? = null
 
     init {
@@ -14,7 +13,6 @@ class DraggablePanel : JPanel(), MouseListener, MouseMotionListener {
     }
 
     override fun mouseDragged(e: MouseEvent) {
-        val viewport = parent as? JViewport ?: return
         val holdPointOnView = holdPointOnView ?: return
         val dragEventPoint = e.point
         val viewPos = viewport.viewPosition
