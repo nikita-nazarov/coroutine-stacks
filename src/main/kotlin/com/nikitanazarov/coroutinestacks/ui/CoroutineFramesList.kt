@@ -30,7 +30,7 @@ class CoroutineFramesList(
         private val itemBorder = BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor.GRAY)
         private val leftPaddingBorder: Border = JBUI.Borders.emptyLeft(3)
         private val compoundBorder = BorderFactory.createCompoundBorder(itemBorder, leftPaddingBorder)
-        private const val cornerRadius = 3
+        private const val cornerRadius = 10
         private const val borderThickness = 1
     }
 

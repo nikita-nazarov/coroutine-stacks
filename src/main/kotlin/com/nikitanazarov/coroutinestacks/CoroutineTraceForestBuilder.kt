@@ -80,10 +80,10 @@ private fun SuspendContextImpl.createCoroutineTraceForest(
         componentData.add(Separator())
     }
 
-    val forest = ContainerWithEdges()
+    val forest = DraggableContainerWithEdges()
     componentData.forEach { forest.add(it) }
     forest.layout = ForestLayout()
-    return DraggableScrollPane(forest)
+    return JBScrollPane(forest)
 }
 
 private fun createCoroutineTraces(rootValue: Node): List<CoroutineTrace?> {
