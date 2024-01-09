@@ -1,3 +1,6 @@
+# The project is now located here:
+https://github.com/google/coroutine-stacks
+
 # Coroutine Stacks
 ![example workflow](https://github.com/nikita-nazarov/coroutine-stacks/actions/workflows/gradle.yml/badge.svg)
 
